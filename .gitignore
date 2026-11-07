@@ -3,33 +3,50 @@ node_modules/
 .pnp
 .pnp.js
 
-# Testing
+# Testing & Coverage
 /coverage
+*.lcov
 
-# Expo
+# Expo & Metro
 .expo/
 dist/
 web-build/
+.metro/
 
-# Native builds
+# Native build artifacts
 android/
 ios/
 
-# Environment variables & secrets
+# Environment files & secrets (Strict)
 .env
 .env*.local
+*.env
 *.local
 credentials.json
 google-services.json
 GoogleService-Info.plist
+firebase-adminsdk*.json
+service-account*.json
 
-# Logs
+# Keystores & Signing Keys
+*.jks
+*.keystore
+*.p12
+*.p8
+*.key
+*.mobileprovision
+
+# NPM / Yarn / Bun debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# Editor & OS files
+# OS / Editor specific
 .DS_Store
-*.pem
 Thumbs.db
-
+*.pem
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
