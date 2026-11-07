@@ -5,6 +5,7 @@ import {
   RECOVERY_KEY_PREFIX,
   SNAPSHOT_KEY_PREFIX,
   PRE_MIGRATION_KEY_PREFIX,
+  MIGRATIONS,
 } from '../services/storage/AsyncStorageAdapter';
 import { getStorage } from '../services/storage';
 import { validateBackupPayload, mergeBackupEnvelopes, isTimestampNewer } from '../utils/backupValidator';
@@ -20,6 +21,9 @@ describe('Step B0: Hardening & Resilience Suite', () => {
 
   beforeEach(async () => {
     jest.restoreAllMocks();
+    (AsyncStorage.setItem as any) = async (key: string, value: string) => {
+      return (AsyncStorage as any).multiSet([[key, value]]);
+    };
     await AsyncStorage.clear();
     adapter = new AsyncStorageAdapter();
   });
@@ -266,22 +270,123 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       const v1Raw = JSON.stringify(v1Data);
       await AsyncStorage.setItem(STORAGE_KEY, v1Raw);
 
+      let failPreserve = true;
       const multiSet = (AsyncStorage as any).multiSet;
-      jest.spyOn(AsyncStorage, 'setItem').mockImplementation(async (key: string, value: string) => {
-        if (key.startsWith(PRE_MIGRATION_KEY_PREFIX)) {
+      (AsyncStorage.setItem as any) = async (key: string, value: string) => {
+        if (failPreserve && key.startsWith(PRE_MIGRATION_KEY_PREFIX)) {
           throw new Error('Failed to write pre-migration snapshot');
         }
         return multiSet([[key, value]]);
-      });
+      };
 
       await expect(adapter.migrateVersion(2)).rejects.toThrow(
         'Migration aborted: pre-migration backup failed'
       );
 
-      jest.restoreAllMocks();
+      failPreserve = false;
+      (AsyncStorage.setItem as any) = async (key: string, value: string) => {
+        return multiSet([[key, value]]);
+      };
 
       // Original data must be completely untouched
       expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(v1Raw);
+    });
+
+    it('should reject malformed v1 collections before migration, lock storage, and leave original primary data unchanged', async () => {
+      // Malformed v1: categories is a string instead of an array
+      const malformedV1 = {
+        schemaVersion: 1,
+        categories: 'not-an-array',
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: { theme: 'dark' },
+      };
+      const raw = JSON.stringify(malformedV1);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      const loaded = await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('missing or invalid core collections or settings');
+      expect(loaded.categories).toEqual([]);
+
+      // Verify original primary storage payload is completely untouched (never overwritten with migrated/defaults)
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
+
+      // Verify recovery copy was preserved
+      const allKeys = await AsyncStorage.getAllKeys();
+      const recoveryKey = allKeys.find((k) => k.startsWith(RECOVERY_KEY_PREFIX));
+      expect(recoveryKey).toBeDefined();
+      expect(await AsyncStorage.getItem(recoveryKey!)).toBe(raw);
+    });
+
+    it('should reject invalid settings type in v1 before migration and leave primary data unchanged', async () => {
+      const invalidSettingsV1 = {
+        schemaVersion: 1,
+        categories: [],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: 'invalid-primitive-string',
+      };
+      const raw = JSON.stringify(invalidSettingsV1);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      const loaded = await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('missing or invalid core collections or settings');
+      expect(loaded.categories).toEqual([]);
+
+      // Primary storage remains completely untouched
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
+
+      // migrateVersion() also safely aborts and preserves original primary payload
+      adapter.clearLock();
+      await expect(adapter.migrateVersion(2)).rejects.toThrow('missing or invalid core collections or settings');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
+    });
+
+    it('should safely handle migration exceptions, lock storage, and leave primary data unchanged', async () => {
+      const raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      // Mock migrator step 1 to throw an exception
+      const originalMigrator = MIGRATIONS[1];
+      MIGRATIONS[1] = () => {
+        throw new Error('Simulated transformer explosion');
+      };
+
+      try {
+        const loaded = await adapter.loadAll();
+        expect(adapter.isStorageLocked()).toBe(true);
+        expect(adapter.getCorruptionError()).toContain('Migration aborted: step execution failed');
+        expect(loaded.categories).toEqual([]);
+
+        // Primary storage remains completely untouched
+        expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
+      } finally {
+        MIGRATIONS[1] = originalMigrator;
+      }
+    });
+
+    it('should abort if a migration step produces an invalid envelope, keeping primary storage untouched', async () => {
+      const raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      // Mock migrator step 1 to produce an envelope missing required categories array
+      const originalMigrator = MIGRATIONS[1];
+      MIGRATIONS[1] = (d: any) => ({ ...d, categories: null, schemaVersion: 2 });
+
+      try {
+        const loaded = await adapter.loadAll();
+        expect(adapter.isStorageLocked()).toBe(true);
+        expect(adapter.getCorruptionError()).toContain('post-migration validation failed');
+
+        // Primary storage remains completely untouched
+        expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
+      } finally {
+        MIGRATIONS[1] = originalMigrator;
+      }
     });
   });
 

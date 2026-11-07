@@ -23,11 +23,14 @@ export type MigrationStep = (data: any) => any;
  */
 export const MIGRATIONS: Record<number, MigrationStep> = {
   1: (v1Data: any) => {
+    if (!v1Data || typeof v1Data !== 'object' || Array.isArray(v1Data)) {
+      throw new Error('Migration input must be a non-null object');
+    }
     const migrated = {
       ...v1Data,
       schemaVersion: 2,
     };
-    if (migrated.settings && 'categories' in migrated.settings) {
+    if (migrated.settings && typeof migrated.settings === 'object' && !Array.isArray(migrated.settings) && 'categories' in migrated.settings) {
       const { categories, ...restSettings } = migrated.settings;
       migrated.settings = restSettings;
     }
@@ -162,6 +165,31 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   /**
+   * Validates core envelope structure and required fields.
+   * Returns an error description string if invalid, or null if valid.
+   */
+  private validateEnvelopeStructure(parsed: any): string | null {
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'Invalid envelope structure: payload is not a JSON object';
+    }
+    if (typeof parsed.schemaVersion !== 'number') {
+      return 'Invalid envelope structure: missing schemaVersion';
+    }
+    if (
+      !Array.isArray(parsed.categories) ||
+      !Array.isArray(parsed.topics) ||
+      !Array.isArray(parsed.topicTasks) ||
+      !Array.isArray(parsed.timetableBlocks) ||
+      typeof parsed.settings !== 'object' ||
+      parsed.settings === null ||
+      Array.isArray(parsed.settings)
+    ) {
+      return 'Invalid envelope structure: missing or invalid core collections or settings';
+    }
+    return null;
+  }
+
+  /**
    * Internal reader with corruption detection and recovery key preservation.
    * If parsing fails or envelope structure is invalid:
    * - Preserves raw value to a timestamped recovery key.
@@ -189,21 +217,20 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       return this.handleCorruptedPayload(raw, `Corrupted JSON payload: ${err.message}`);
     }
 
-    // Handle valid JSON with invalid envelope structure (e.g. null, primitives, arrays)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: payload is not a JSON object');
+    // Step 1: Validate incoming envelope structure and required fields BEFORE migration or loading
+    const structureError = this.validateEnvelopeStructure(parsed);
+    if (structureError) {
+      return this.handleCorruptedPayload(raw, structureError);
     }
 
-    if (typeof parsed.schemaVersion !== 'number') {
-      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing schemaVersion');
-    }
-
+    // Step 2: Check schema version
     if (parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
       return this.handleCorruptedPayload(raw, `Unknown future schema version: ${parsed.schemaVersion}`);
     }
 
+    // Step 3: Sequential migration if schema version is older than CURRENT_SCHEMA_VERSION
     if (parsed.schemaVersion < CURRENT_SCHEMA_VERSION) {
-      // Step 1: Pre-migration preservation
+      // 3a: Pre-migration preservation
       const preMigrationKey = `${PRE_MIGRATION_KEY_PREFIX}${Date.now()}`;
       try {
         await AsyncStorage.setItem(preMigrationKey, raw);
@@ -218,32 +245,36 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         );
       }
 
-      // Step 2: Sequential migrations
+      // 3b: Sequential migration execution with safe exception handling
       let currentData = parsed;
-      for (let v = parsed.schemaVersion; v < CURRENT_SCHEMA_VERSION; v++) {
-        const migrator = MIGRATIONS[v];
-        if (!migrator) {
-          return this.handleCorruptedPayload(raw, `Missing migration step from version ${v} to ${v + 1}`);
+      try {
+        for (let v = parsed.schemaVersion; v < CURRENT_SCHEMA_VERSION; v++) {
+          const migrator = MIGRATIONS[v];
+          if (!migrator) {
+            return this.handleCorruptedPayload(raw, `Missing migration step from version ${v} to ${v + 1}`);
+          }
+          currentData = migrator(currentData);
+          currentData.schemaVersion = v + 1;
         }
-        currentData = migrator(currentData);
-        currentData.schemaVersion = v + 1;
+      } catch (migrationErr: any) {
+        return this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: step execution failed (${migrationErr?.message})`
+        );
       }
 
-      // Step 3: Write migrated data
+      // 3c: Validate resulting envelope structure BEFORE writing to primary storage
+      const postMigrationError = this.validateEnvelopeStructure(currentData);
+      if (postMigrationError) {
+        return this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: post-migration validation failed (${postMigrationError})`
+        );
+      }
+
+      // 3d: Write validated migrated data to primary storage
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
       parsed = currentData;
-    }
-
-    // Verify required core entity collections exist
-    if (
-      !Array.isArray(parsed.categories) ||
-      !Array.isArray(parsed.topics) ||
-      !Array.isArray(parsed.topicTasks) ||
-      !Array.isArray(parsed.timetableBlocks) ||
-      typeof parsed.settings !== 'object' ||
-      parsed.settings === null
-    ) {
-      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing core collections or settings');
     }
 
     // Clean legacy settings.categories if present
@@ -483,12 +514,16 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       let parsed: any;
       try {
         parsed = JSON.parse(raw);
-      } catch {
-        throw new Error('Cannot run migration: stored payload is corrupted');
+      } catch (err: any) {
+        await this.handleCorruptedPayload(raw, `Corrupted JSON payload in storage: ${err.message}`);
+        throw new Error(`Cannot run migration: stored payload is corrupted (${err.message})`);
       }
 
-      if (typeof parsed.schemaVersion !== 'number') {
-        throw new Error('Cannot run migration: missing schemaVersion');
+      // Pre-migration validation: ensure envelope structure and required fields are valid before migrating
+      const structureError = this.validateEnvelopeStructure(parsed);
+      if (structureError) {
+        await this.handleCorruptedPayload(raw, `Pre-migration validation failed: ${structureError}`);
+        throw new Error(`Cannot run migration: ${structureError}`);
       }
 
       if (targetVersion > CURRENT_SCHEMA_VERSION || !MIGRATIONS[targetVersion - 1]) {
@@ -496,7 +531,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       }
 
       if (parsed.schemaVersion >= targetVersion) {
-        return parsed;
+        return parsed as StoredDataEnvelope;
       }
 
       // Step 1: Pre-migration preservation
@@ -508,21 +543,43 @@ export class AsyncStorageAdapter implements IStorageAdapter {
           throw new Error('Pre-migration preservation verification failed: content mismatch');
         }
       } catch (preserveErr: any) {
+        await this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: pre-migration backup failed (${preserveErr?.message})`
+        );
         throw new Error(`Migration aborted: pre-migration backup failed (${preserveErr?.message})`);
       }
 
-      // Step 2: Sequential migrations
+      // Step 2: Sequential migrations with safe exception handling
       let currentData = parsed;
-      for (let v = parsed.schemaVersion; v < targetVersion; v++) {
-        const migrator = MIGRATIONS[v];
-        if (!migrator) {
-          throw new Error(`Missing migration step from version ${v} to ${v + 1}`);
+      try {
+        for (let v = parsed.schemaVersion; v < targetVersion; v++) {
+          const migrator = MIGRATIONS[v];
+          if (!migrator) {
+            throw new Error(`Missing migration step from version ${v} to ${v + 1}`);
+          }
+          currentData = migrator(currentData);
+          currentData.schemaVersion = v + 1;
         }
-        currentData = migrator(currentData);
-        currentData.schemaVersion = v + 1;
+      } catch (migrationErr: any) {
+        await this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: step execution failed (${migrationErr?.message})`
+        );
+        throw new Error(`Migration aborted: step execution failed (${migrationErr?.message})`);
       }
 
-      // Step 3: Write migrated data
+      // Step 3: Validate resulting envelope structure BEFORE writing to primary storage
+      const postMigrationError = this.validateEnvelopeStructure(currentData);
+      if (postMigrationError) {
+        await this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: post-migration validation failed (${postMigrationError})`
+        );
+        throw new Error(`Migration aborted: post-migration validation failed (${postMigrationError})`);
+      }
+
+      // Step 4: Write migrated data to primary storage
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
       return currentData as StoredDataEnvelope;
     });
