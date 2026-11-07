@@ -59,9 +59,9 @@ flowchart TD
 - **Multi-Tab Behavior:** `persistentMultipleTabManager()` coordinates synchronization across multiple open browser tabs so writes made in Tab A update Tab B without write collisions.
 - **Web Privacy & Security Consideration:** Because IndexedDB persists locally in the browser profile, users on shared or public workstations must be warned to sign out or use private/incognito browsing to avoid leaving cached task data on disk.
 
-### Data Abstraction Interface & Timestamp Type Decoupling
+### Data Abstraction Interface & Serialisable Timestamp Type
 To ensure complete type compatibility across both SDKs without build errors:
-- **Domain Timestamp Interface:** The shared types do NOT import `Timestamp` directly from `firebase/firestore` or `@react-native-firebase/firestore`. Instead, domain models use an agnostic interface `AppTimestamp` with standard seconds/nanoseconds representations and helper conversion methods (`toDate()`, `toMillis()`).
+- **Serialisable Domain Timestamp:** The shared types do NOT import `Timestamp` directly from `firebase/firestore` or `@react-native-firebase/firestore`. Instead, domain models use an agnostic, JSON-serialisable interface `AppTimestamp` with standard seconds/nanoseconds representations and helper conversion methods (`toDate()`, `toMillis()`, `toISOString()`).
 - Platform adapters (`firestore.native.ts` and `firestore.web.ts`) handle bidirectionally mapping their respective native SDK `Timestamp` objects to and from the domain `AppTimestamp`.
 
 ---
@@ -76,13 +76,14 @@ To ensure complete type compatibility across both SDKs without build errors:
    - `actualEnd` is set when the user triggers "Finish".
    - Neither field is overwritten when editing planned times, titles, categories, or notes.
    - **Reopening Completed Tasks:** If a task was marked `done` by mistake, a deliberate "Reopen" action:
-     - Moves current `{ actualStart, actualEnd, completedAt }` into an audit array: `actualHistory: ActualTimeEntry[]`.
+     - Moves current `{ actualStart, actualEnd, reopenedAt }` into an audit array: `actualHistory: ActualTimeEntry[]` (using `actualEnd` as completion time).
      - Resets `actualStart` and `actualEnd` to `null`.
      - Changes `status` back to `in_progress`.
      - This preserves past time records while enabling a fresh Start/Finish sequence.
 4. **Idempotent Routine Generation (Create-If-Not-Exists):**
    - Deterministic task IDs format: `${sourceTemplateId}_${date}_${blockId}` (using stable string `blockId`, e.g. `career_morning`, rather than array index).
    - Generated using **create-if-not-exists transactions** (`transaction.get()` then create only if missing).
+   - **Online-Only Generation Rule:** Because Firestore transactions require server connectivity, routine generation runs only when the device is online. If offline, generation skips silently and retries upon the next app open or network reconnect. The UI is **never blocked** by routine generation.
    - If a document already exists at that ID (whether pending, in progress, completed, or custom-edited), it is **never overwritten**.
    - Multiple devices running generation simultaneously will cleanly no-op on existing records.
 
@@ -93,18 +94,18 @@ export type TaskPriority = 'high' | 'medium' | 'low';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
 
-/** Platform-independent Timestamp interface compatible with both Web and Native Firebase SDKs */
+/** Platform-independent, JSON-serialisable Timestamp interface compatible with both Web and Native Firebase SDKs */
 export interface AppTimestamp {
   seconds: number;
   nanoseconds: number;
   toDate(): Date;
   toMillis(): number;
+  toISOString(): string;
 }
 
 export interface ActualTimeEntry {
   actualStart: AppTimestamp;
   actualEnd: AppTimestamp;
-  completedAt: AppTimestamp;
   reopenedAt: AppTimestamp;
 }
 
@@ -194,8 +195,8 @@ export interface UserSettings {
 ### Exact Alarm vs Best-Effort Delivery
 - **`alarmClock` Delivery:** Uses Android `AlarmManager.setAlarmClock()`. Intended to wake the device CPU for time-critical alarms.
   - **Reference:** Introduced in `expo-notifications` (Expo SDK 58, PR `#49687`: [Expo Notifications Changelog](https://github.com/expo/expo/blob/main/packages/expo-notifications/CHANGELOG.md)).
-  - **Verification Status:** **UNVERIFIED on our physical hardware**. OEM battery optimizations (MIUI/HyperOS, ColorOS, OneUI) may still restrict background alarms; full reliability will be tested in **Step 3.5**. If unverified or failing, **Notifee** will be evaluated as a native alternative.
-- **`bestEffort` Delivery:** Default delivery mode when exact alarm permissions are absent or rejected. The OS batches notifications, causing delivery delays of 5–15 minutes.
+  - **Verification Status:** **UNVERIFIED on target physical hardware**. Will be experimentally verified in **Step 3.5**. If unverified or failing, **Notifee** will be evaluated as a native alternative.
+- **`bestEffort` Delivery:** Standard Android notification delivery using inexact alarms (`AlarmManager.set()` or `setWindow()`). The operating system may batch or delay notifications by 5–15 minutes (or longer during deep Doze mode) to conserve battery. Used for non-fixed task reminders and as the graceful fallback whenever exact alarm permissions are absent or denied.
 - **Which Reminders Use Exact Delivery:**
   1. Task start alarms where `isFixed == true` (time-critical commitments).
   2. Daily Wake-up and Wind-down safety net alarms.

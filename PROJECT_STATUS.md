@@ -1,17 +1,17 @@
 # Project Status
 
 **Current Phase:** Phase 1 (Foundation & Setup)  
-**Status:** In Progress — Architecture & Planning Under Multi-AI Review (Awaiting User Sign-off)  
+**Status:** In Progress — Step 1: Expo Project Scaffolding  
 **Last Updated:** 2026-11-07  
 
 ---
 
 ## 1. Overall Progress Tracker
-- [ ] Phase 1 Architecture & Specifications Approved by User *(Under Review)*
+- [x] Phase 1 Architecture & Specifications Approved by User (Decisions 001–004, 006–012 Approved; 005 Unverified; 013 Undecided)
 - [x] Multi-AI Workflow & Documentation Governance Established
 - [x] Environment Prerequisites Setup (Git & Node.js installed on host system)
 - [x] Local Git Repository Initialized & Synced with Remote (`main` branch on GitHub)
-- [ ] Step 1: Expo React Native + TypeScript Project Scaffolding
+- [ ] Step 1: Expo React Native + TypeScript Project Scaffolding *(In Progress)*
 - [ ] Step 2: Theme, Navigation & Base UI Components
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification
@@ -32,5 +32,5 @@
 ---
 
 ## 2. Immediate Blockers & Action Items
-1. **User Approval Required:** Review updated specifications incorporating feedback from Claude and ChatGPT. Once you provide final approval, we proceed to **Step 1: Expo Project Scaffolding**.
-2. **Next Step:** Initialize Expo React Native project with TypeScript and Expo Router.
+1. **Active Step:** Execute **Step 1: Expo Project Scaffolding**.
+2. **Next Milestone:** Test app running in browser and on Android phone via Expo Go, then stop for user review before Step 2.

@@ -2,13 +2,11 @@
 
 This document records architectural choices, evaluation of alternatives, and implementation decisions.
 
-> **Status Protocol:** All decisions remain **"Proposed — Awaiting User Approval"** until explicitly confirmed by the user.
-
 ---
 
 ## Decision 001 — Tech Stack
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 | Choice | Selected | Alternatives Considered | Reason |
 |---|---|---|---|
@@ -24,7 +22,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 002 — Development Build vs Expo Go
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Use Expo Go for initial Step 1 & Step 2 UI scaffolding, then transition to an **EAS Development Build** at Step 3 (Firebase & Notifications).
 
@@ -41,9 +39,9 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 003 — Dual Firebase SDK Strategy & Decoupled Domain Types
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
-**Decision:** Use `@react-native-firebase/firestore` (native Android SDK) on Android and `firebase/firestore` (JS modular SDK) on web, united under a shared service interface (`firestore.ts`) and a decoupled `AppTimestamp` domain type.
+**Decision:** Use `@react-native-firebase/firestore` (native Android SDK) on Android and `firebase/firestore` (JS modular SDK) on web, united under a shared service interface (`firestore.ts`) and a decoupled, serialisable `AppTimestamp` domain type.
 
 **Offline Persistence Clarifications:**
 - **Android:** Native SDK manages an on-disk SQLite/LevelDB cache. Pending writes survive standard process termination.
@@ -54,7 +52,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 004 — Notification Sync & Rolling Window
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Align both **task generation** and **notification scheduling** to a unified **7-day rolling window**.
 
@@ -69,29 +67,30 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 005 — Android Alarm Delivery Mode
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval (Verification at Step 3.5)  
+**Status:** UNVERIFIED on target physical hardware (Confirmation in Step 3.5)  
 
 **Decision:** Utilize `delivery: 'alarmClock'` on Android `IMPORTANCE_HIGH` channels for time-critical alarms.
 
 **Verification Status:** **UNVERIFIED on target physical hardware.**
 - Documentation: Introduced in `expo-notifications` (Expo SDK 58, PR `#49687`: [Expo Notifications Changelog](https://github.com/expo/expo/blob/main/packages/expo-notifications/CHANGELOG.md)).
-- Softened Claim: While `setAlarmClock` is designed to bypass standard battery optimizations, OEM skins (MIUI/HyperOS, ColorOS) can still enforce aggressive restrictions. Reliability will be tested experimentally in **Step 3.5**.
+- Softened Claim: While `setAlarmClock` is designed to wake the CPU and bypass standard battery optimizations, OEM skins (MIUI/HyperOS, ColorOS) can still enforce aggressive background restrictions. Reliability will be tested experimentally in **Step 3.5**.
 - Fallback: If `expo-notifications` fails physical device wake tests (in Step 3.5), we will evaluate **Notifee** as the native alarm engine.
 - Exact vs Best-Effort:
   - Exact (`alarmClock`): Reserved for `isFixed == true` tasks and daily wake-up/sleep alarms.
-  - Best-Effort (`bestEffort`): Standard fallback if user rejects `SCHEDULE_EXACT_ALARM` permissions on Android 14+.
+  - Best-Effort (`bestEffort`): Standard fallback if user rejects `SCHEDULE_EXACT_ALARM` permissions on Android 14+. Delivers via inexact alarms which the OS may batch or delay by 5–15 minutes.
 
 ---
 
 ## Decision 006 — Routine Generation: Deterministic IDs & Create-If-Not-Exists
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Routine templates generate independent task instances for a 7-day rolling window using deterministic IDs:
 `${sourceTemplateId}_${date}_${blockId}` (using a stable string `blockId` rather than index).
 
 **Idempotent Generation Rules:**
 - Generation uses Firestore transactions with a strict **create-if-not-exists** check (`transaction.get()` then create only if missing).
+- **Online-Only Generation:** Firestore transactions require online connectivity. Routine generation runs only when online, skips silently when offline, and retries on next app open or reconnect. It **never blocks the UI**.
 - Existing tasks (whether pending, in progress, completed, or custom-edited) are **never overwritten**.
 - Multi-device generation (e.g. opening web and mobile simultaneously) writes to identical document paths without generating duplicates or clobbering edits.
 - Modifying a template never modifies past or completed tasks. Future task modifications require explicit user confirmation.
@@ -100,20 +99,20 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 007 — No Automatic Schedule Changes & Reopening Tasks
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** The system will never silently alter or delete tasks without user confirmation.
 
 **Reopening Tasks:**
 - Tasks marked `done` by mistake can be reopened back to `in_progress`.
-- On reopen, the previous execution record (`actualStart`, `actualEnd`, `completedAt`) is archived into an `actualHistory` array.
+- On reopen, the previous execution record (`actualStart`, `actualEnd`, `reopenedAt`) is archived into an `actualHistory` array (using `actualEnd` as completion time).
 - Current `actualStart` and `actualEnd` are reset to `null` so the user can record a fresh Start/Finish sequence.
 
 ---
 
 ## Decision 008 — Timestamp Storage (UTC) and Display (IST)
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** All timestamps stored in UTC. Displayed and queried in IST (`Asia/Kolkata`, UTC+5:30). Date strings (`"YYYY-MM-DD"`) represent the IST calendar day.
 
@@ -121,7 +120,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 009 — Write-Once Actual Execution Times & Execution History
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** `actualStart` and `actualEnd` are immutable once set during an active session. They cannot be overwritten during planned schedule edits. Reopening a task archives them to `actualHistory` rather than erasing past data.
 
@@ -129,7 +128,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 010 — Dual-Layer Task Validation
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Validate task properties both on the client before write and on the server via Firestore Security Rules:
 - Server checks: key whitelist (`keys().hasOnly()`), title length 1-200, valid priority/status enum, duration 5-480 min, `plannedEnd > plannedStart`, status transition state machine, and actual times protection.
@@ -138,7 +137,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 011 — Backup & Recovery Protocol with Verified Pre-Backup
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Settings screen provides manual JSON Export and Import.
 - **Mandatory Pre-Backup:** Triggering "Replace All" on import will **abort immediately** if it fails to verify that a complete safety backup of the existing state was successfully generated and saved to device storage (verified via file size / download blob confirmation).
@@ -148,7 +147,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 012 — Physical Device Alarm Test Suite (Step 3.5)
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** Approved by user (2026-11-07)  
 
 **Decision:** Step 3.5 requires passing a structured physical-device alarm checklist before building remaining Phase 1 features:
 1. App in foreground (visual heads-up banner + sound).
@@ -162,7 +161,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 013 — Costs & Phase 5 Architecture Route
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting User Approval  
+**Status:** UNDECIDED for Phase 5  
 
 **Decision:**
 - **Phases 1–4:** Run strictly on the **Firebase Spark (Free) plan** and **Expo EAS Free Tier** (15 Android builds/month; unlimited local builds). No credit card required.

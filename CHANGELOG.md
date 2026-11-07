@@ -9,15 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - **Multi-AI Documentation Suite:** Created `PROJECT_BRIEF.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `PROJECT_STATUS.md`, `CHANGELOG.md`, `REVIEW_QUEUE.md`, and `AI_WORKFLOW.md`.
 - **Git Security:** Added `.env.example` template and hardened `.gitignore` for `.env*`, `.firebase/`, logs, keystores, signing keys, service accounts, and Firebase config files.
-- **Decoupled Timestamp Model:** Defined agnostic `AppTimestamp` domain interface, eliminating direct SDK coupling to `firebase/firestore` Timestamp class and ensuring compile compatibility with `@react-native-firebase/firestore`.
+- **Decoupled Timestamp Model:** Defined agnostic, serialisable `AppTimestamp` domain interface, eliminating direct SDK coupling to `firebase/firestore` Timestamp class and ensuring compile compatibility with `@react-native-firebase/firestore`.
 - **Execution Run History (`actualHistory`):** Added `ActualTimeEntry[]` schema on `Task` to preserve audit records when tasks are reopened.
 - **Deterministic Stable Block IDs:** Updated task generation to use `${sourceTemplateId}_${date}_${blockId}` with create-if-not-exists transactions.
 - **Mandatory Pre-Backup on Import:** Implemented verified safety export before executing "Replace All" JSON imports.
 - **Enhanced Security Rules:** Added whitelist validation (`keys().hasOnly()`), status state machine checks, write-once actual times enforcement, and structural schemas for routine templates and settings.
 
 ### Changed
+- **Architecture & Decisions Approval:** User confirmed approval of Phase 1 specifications and Decisions 001–004 and 006–012 on 2026-11-07. Decision 005 remains UNVERIFIED on target physical hardware pending Step 3.5 testing. Decision 013 Phase 5 architecture remains UNDECIDED.
+- **Online-Only Routine Generation:** Documented that routine transactions run only when online, skip silently when offline, and never block the UI.
+- **Removed completedAt:** Replaced `completedAt` in reopen history with `actualEnd`.
+- **Best-Effort Notification Clarity:** Accurately detailed `bestEffort` notification delivery via Android inexact alarms with 5–15 min OS batching.
 - **Repository Visibility:** Updated `AI_WORKFLOW.md` to accurately reflect that the GitHub repository is Private.
-- **Alarm Permission Revocation:** Updated foreground resync to detect revoked `SCHEDULE_EXACT_ALARM` permissions and re-register exact alarms upon app launch.
-- **Phase 5 Decision 013:** Removed client-side BYOK option; strictly enforced that API keys will never appear in frontend code.
-- **Alarm Claims Softened:** Marked `delivery: 'alarmClock'` as UNVERIFIED on target physical hardware pending Step 3.5 physical testing, with Notifee designated as fallback.
-- **Decision Statuses:** Maintained all entries in `DECISIONS.md` as "Proposed — Awaiting User Approval".
