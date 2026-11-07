@@ -542,32 +542,32 @@ Replace-All replaces existing datasets with an imported backup or alternative da
 ### Expo & Google OAuth Configuration
 - **Android Package Identifier:** `com.melvin.timemanagementapp` (strictly matching `app.json`).
 - **EAS Development Build Requirement:** Native Google Sign-In and `@react-native-firebase` require native modules and cannot run inside standard Expo Go. Testing must use EAS Development Builds (`npx expo run:android` or `eas build --profile development`).
-- **SHA-1 Fingerprints:** Both local debug keystore SHA-1 (`keytool -list -v -keystore ~/.android/debug.keystore`) and EAS cloud keystore SHA-1 must be registered under the Android App in Firebase Console.
+- **Real Firebase Configuration Timing:** A successful native Android compilation requires a valid `google-services.json` and `"android.googleServicesFile": "./google-services.json"` in `app.json`. Because Firebase project creation is deferred to Step B2 (pending user region selection), native compilation is deferred to Step B2 when real configuration is available. For Step B1, the template `google-services.json.example` is checked in and `google-services.json` is protected by `.gitignore`.
+- **SHA-1 Fingerprints:** Both local debug keystore SHA-1 (`keytool -list -v -keystore ~/.android/debug.keystore`) and EAS cloud keystore SHA-1 must be registered under the Android App in Firebase Console in Step B2.
 - **Web OAuth Redirect Domains:** `localhost`, `127.0.0.1`, and production hosting domains must be registered under Firebase Auth > Settings > Authorized Domains.
-- **Expo Config Plugins:** `app.json` includes `@react-native-firebase/app` in the `plugins` array.
+- **Expo Config Plugins:** `app.json` includes `expo-router`, `expo-sharing`, `@react-native-firebase/app`, `@react-native-firebase/auth`, and `@react-native-google-signin/google-signin`.
 
 ---
 
-## 8. Exact Dependency Compatibility Matrix (Strict No-Installation Rule)
+## 8. Verified Installed Dependency Matrix & Compatibility
 
-> [!WARNING]
-> **NO PACKAGES ARE TO BE INSTALLED AT THIS TIME.**  
-> Package installations will occur only in Step B1 after this plan is formally approved by ChatGPT and the User.
-
-All proposed dependencies are verified against the current project environment:
+All dependencies for Step B1 have been installed and verified against the current project environment:
 - **Expo Core:** `~58.0.23` (Installed)
 - **React Native:** `0.88.1` (Installed)
 - **React:** `19.3.0` (Installed)
 - **Architecture:** New Architecture Enabled (`"newArchEnabled": true` in `app.json`)
 
-| Package Name | Exact Target Version | Compatibility & Verification Analysis |
+| Package Name | Exact Installed Version | Compatibility & Verification Analysis |
 | :--- | :--- | :--- |
-| `expo-dev-client` | `~58.0.1` | Native Expo SDK 58 package. Fully compatible with RN 0.88.1 and New Architecture Bridgeless mode. Replaces obsolete `~5.0.x`. |
-| `@react-native-firebase/app` | `21.11.0` | Native Android Firebase core module. Version 21.11.0+ fully supports React Native 0.88 with New Architecture (TurboModules) and React 19.3.0. |
-| `@react-native-firebase/auth` | `21.11.0` | Native Android Firebase Authentication. Matching Invertase suite release. |
-| `@react-native-firebase/firestore` | `21.11.0` | Native Android Firestore module with native SQLite/LevelDB disk cache. Matching Invertase suite release. |
-| `@react-native-google-signin/google-signin` | `13.1.0` | Official Google Play Services native OAuth library. Full TurboModules support; verified compatible with RN 0.88 and Expo config plugins. |
-| `firebase` | `11.4.0` | Modular Web JS SDK. Pure JavaScript; zero native bridge dependencies; 100% compatible with React 19.3.0, React Native Web, and modern bundlers. |
+| `expo-dev-client` | `~58.0.18` | Official native Expo SDK 58 package. Aligned with RN 0.88.1 and New Architecture Bridgeless mode. (Replaced obsolete `~5.0.x`). |
+| `@react-native-firebase/app` | `^27.1.0` | Native Android Firebase core module. Invertase v27 release designed for React Native 0.88+, React 19, and New Architecture (TurboModules). |
+| `@react-native-firebase/auth` | `^27.1.0` | Native Android Firebase Authentication module matching v27 Invertase release. |
+| `@react-native-firebase/firestore` | `^27.1.0` | Native Android Firestore module with native SQLite/LevelDB disk persistence. |
+| `@react-native-google-signin/google-signin` | `^17.0.0` | Official Google Play Services native OAuth library with TurboModules support. Verified compatible with RN 0.88 and Expo config plugins. |
+| `firebase` | `^13.2.0` | Modular Web JS SDK v13. Pure JavaScript; zero native bridge dependencies; 100% compatible with React 19.3.0, React Native Web, and modern bundlers. |
+
+> [!NOTE]
+> **Stage Blocker Status (REV-022):** Dependencies and configuration have passed `npm test` (50 unit tests), `npm run typecheck`, `npx expo config --type public`, and `npx expo export --platform web`. However, **`REV-022` remains open as PARTIALLY VERIFIED — Android native build pending** until a native Android development build compiles cleanly.
 
 ---
 
@@ -589,14 +589,16 @@ gantt
 ```
 
 ### Step B1: Dependency Installation & Native Build Configuration
-- Install verified SDK 58 dependencies (`expo-dev-client`, `@react-native-firebase/*`, `@react-native-google-signin/*`, `firebase`).
-- Update `app.json` with `@react-native-firebase/app` plugin, package name `com.melvin.timemanagementapp`, and `googleServicesFile`.
-- Add `google-services.json` to `.gitignore` and create `google-services.json.example`.
-- Build EAS Android development client (`npx expo run:android` or `eas build --profile development`).
-- **Test Gate:** Dev client builds cleanly; web exports cleanly (`npx expo export --platform web`).
+- Installed verified SDK 58 dependencies (`expo-dev-client@~58.0.18`, `@react-native-firebase/*@^27.1.0`, `@react-native-google-signin/google-signin@^17.0.0`, `firebase@^13.2.0`).
+- Configured `app.json` plugins (`@react-native-firebase/app`, `@react-native-firebase/auth`, `@react-native-google-signin/google-signin`).
+- Verified Android package `com.melvin.timemanagementapp` and created `google-services.json.example`.
+- Created `eas.json` for development client build profile (`developmentClient: true`, `distribution: "internal"`).
+- **Native Build Prerequisite:** Compiling the native development client requires the real `google-services.json`, which is deferred to Step B2 after Firebase project setup.
+- **Test Gate:** `npm test` (50/50 tests passing), `npm run typecheck` (clean), `npx expo config --type public` (valid), and `npx expo export --platform web` (exported cleanly). REV-022 remains open until native Android build execution.
 
 ### Step B2: Firebase Project Setup, Security Rules & Emulator Testing
-- Prompt user for explicit region confirmation (`asia-south1` candidate) and initialize Firebase project.
+- Prompt user for explicit region confirmation (`asia-south1` candidate) and initialize Firebase project in Firebase Console.
+- Download real `google-services.json`, add `"android.googleServicesFile": "./google-services.json"` to `app.json`, and run native development build (closing REV-022).
 - Set up Firebase Emulator suite locally for Firestore and Auth.
 - Write automated security rules tests using `@firebase/rules-unit-testing`:
   - **Hard Delete Rejection:** Test `deleteDoc()` denied across all collections.
@@ -604,13 +606,15 @@ gantt
   - **Pre-Populated Block Rejection:** Test creation with pre-populated `actualStart`, `actualEnd`, or `actualHistory` is rejected.
   - **Lifecycle Transitions:** Test `planned` -> `in_progress` -> `completed` execution timestamp settings.
   - **Execution Time Immutability:** Test modifying already set `actualStart` or `actualEnd` is denied.
-  - **Append-Only History Enforcement:** Test that modifying/removing existing history entries is denied, and appending valid entries succeeds.
+  - **Append-Only History Enforcement (REV-019):** Test that modifying/removing existing history entries is denied, and appending valid entries succeeds.
+  - **Real Calendar-Date Bounds (REV-020):** Test date formatting and month-day bounds.
   - **Deleted Foreign-Key Rejection:** Test that creating a topic or block referencing a soft-deleted category (`isDeleted: true`) is rejected.
   - **Timestamp Bounds:** Test `actualEnd < actualStart` is rejected.
-  - **Regex Validation:** Test invalid dates (`2026-02-31`), times (`25:00`), and durations (<5 or >480) are rejected.
+  - **Regex Validation:** Test invalid dates, times, and durations are rejected.
 - **Test Gate:** 100% of Firebase Security Rules emulator tests pass.
 
 ### Step B3: Authentication Service & Auth Gate UI
+- **Blocker Investigation (REV-023):** Investigate `@react-native-google-signin/google-signin@17.0.0` native Android dependencies, Play Services configurations, and Google's deprecation of legacy GoogleSignInClient in favor of modern Android 14+ Credential Manager prior to implementing native authentication.
 - Implement `IAuthService` interface with `auth.native.ts` (GoogleSignin) and `auth.web.ts` (Firebase Auth popup).
 - Build `AuthGate` component and update Settings screen with Account / Sign-In status.
 - Implement token refresh and automatic session restoration.
@@ -625,7 +629,7 @@ gantt
 ### Step B5: Resumable Local-to-Cloud Migration
 - Implement `CloudMigrationService` with `migrationSessionId`, checkpointing (`@time_mgmt_migration_checkpoint`), and three-way document classification.
 - Build Migration Confirmation Dialog with exact record counts preview.
-- Implement Replace-All cloud cleanup with batched soft-deletes and rollback recovery.
+- Implement Replace-All cloud cleanup with batched soft-deletes and rollback recovery (**REV-021**).
 - Write automated tests simulating batch failures, network interruptions, and resumption.
 - **Test Gate:** Interrupted migration resumes cleanly without duplicate records; local AsyncStorage remains untouched.
 
@@ -640,19 +644,19 @@ gantt
 
 ## 10. Testing Gates & Verification Matrix
 
-| Step | Automated Test Suite | Manual Verification Gate |
-| :--- | :--- | :--- |
-| **B1** | `npm test`, `npm run typecheck`, `npx expo export --platform web` | EAS development build boots on Android device |
-| **B2** | `@firebase/rules-unit-testing` emulator suite covering hard delete rejection, soft delete, append-only history, and foreign keys | Security rules deployed to Firebase Console |
-| **B3** | Auth store unit tests with mock providers | Interactive Google Sign-In & Sign-Out on Android & Web |
-| **B4** | Firestore adapter CRUD tests against Emulator | Data inspected in Firebase Emulator UI |
-| **B5** | Checkpoint serialization, retry idempotency, and partial-batch recovery tests | Full local dataset migrated with count confirmation dialog |
-| **B6** | Timestamp conflict resolution and orphan preservation unit tests | Android airplane mode test: edit offline -> reconnect -> verify sync |
+| Step | Automated Test Suite | Manual Verification Gate | Status |
+| :--- | :--- | :--- | :--- |
+| **B1** | `npm test`, `npm run typecheck`, `npx expo export --platform web` | EAS development build boots on Android device | **Partially Verified (REV-022 open until native build)** |
+| **B2** | `@firebase/rules-unit-testing` emulator suite covering hard delete rejection, soft delete, append-only history (REV-019), and foreign keys | Real `google-services.json` registered & security rules deployed | Pending B1 approval & user region selection |
+| **B3** | Auth store unit tests with mock providers | Interactive Google Sign-In & Sign-Out on Android (addressing REV-023) & Web | Pending B2 |
+| **B4** | Firestore adapter CRUD tests against Emulator | Data inspected in Firebase Emulator UI | Pending B3 |
+| **B5** | Checkpoint serialization, retry idempotency, and Replace-All rollback tests (REV-021) | Full local dataset migrated with count confirmation dialog | Pending B4 |
+| **B6** | Timestamp conflict resolution and orphan preservation unit tests | Android airplane mode test: edit offline -> reconnect -> verify sync | Pending B5 |
 
 ---
 
 ## 11. Summary & Next Steps
 
-This revised plan incorporates comprehensive security rules, explicit migration retry classifications, non-destructive merge logic, Replace-All rollback protections, pinned compatible dependencies, and user-guided region selection.
+This plan incorporates comprehensive security rules, explicit migration retry classifications, non-destructive merge logic, Replace-All rollback protections, exact installed dependencies, and user-guided region selection.
 
-**Next Action:** Await final review by ChatGPT and explicit approval from the User before initiating Step B1. No code or configuration changes will be made until approval is granted.
+**Next Action:** Await final review by ChatGPT and explicit approval from the User before initiating Step B2. No code changes, Firebase project creation, or package installations will occur until Step B2 is authorized.
