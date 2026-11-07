@@ -26,3 +26,4 @@ export interface TimetableBlock {
   actualEnd?: AppTimestamp | null;
   actualHistory?: unknown[];
 }
+

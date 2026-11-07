@@ -11,3 +11,4 @@ export interface Category {
   createdAt: AppTimestamp;
   updatedAt: AppTimestamp;
 }
+

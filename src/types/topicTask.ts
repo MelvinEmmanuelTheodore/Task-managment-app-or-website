@@ -13,3 +13,4 @@ export interface TopicTask {
   createdAt: AppTimestamp;
   updatedAt: AppTimestamp;
 }
+

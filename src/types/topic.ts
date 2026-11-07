@@ -11,3 +11,4 @@ export interface Topic {
   createdAt: AppTimestamp;
   updatedAt: AppTimestamp;
 }
+

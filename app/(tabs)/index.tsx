@@ -20,7 +20,7 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     loadInitialData();
-  }, [loadInitialData]);
+  }, []);
 
   if (isLoading) {
     return (

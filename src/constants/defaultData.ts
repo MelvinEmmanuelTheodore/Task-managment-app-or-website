@@ -104,3 +104,4 @@ export const DEFAULT_TOPICS: Topic[] = [
   { id: 'top_ent_3', categoryId: 'cat_entertainment', name: 'YouTube and other entertainment', priority: 'low', sortOrder: 3, isActive: true, createdAt: now, updatedAt: now },
   { id: 'top_ent_4', categoryId: 'cat_entertainment', name: 'Social media', priority: 'low', sortOrder: 4, isActive: true, createdAt: now, updatedAt: now },
 ];
+

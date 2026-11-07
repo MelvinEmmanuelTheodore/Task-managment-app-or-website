@@ -14,7 +14,7 @@ interface CategoryTopicState {
   isLoading: boolean;
 
   // Actions
-  loadInitialData: () => Promise<void>;
+  loadInitialData: (force?: boolean) => Promise<void>;
   
   // Category Actions
   addCategory: (name: string, priority: Priority, color: string) => Promise<Category>;
@@ -54,7 +54,10 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
   topicTasks: [],
   isLoading: true,
 
-  loadInitialData: async () => {
+  loadInitialData: async (force = false) => {
+    if (!force && get().categories.length > 0) {
+      return;
+    }
     set({ isLoading: true });
     const envelope = await storageAdapter.loadAll();
     set({

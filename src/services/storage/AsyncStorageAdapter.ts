@@ -189,3 +189,4 @@ export class AsyncStorageAdapter implements IStorageAdapter {
 }
 
 export const storageAdapter: IStorageAdapter = new AsyncStorageAdapter();
+

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Topic } from '../types/topic';
 import { ProgressBar } from './ProgressBar';
@@ -15,9 +15,19 @@ interface TopicCardProps {
 export function TopicCard({ topic, categoryColor, onPress }: TopicCardProps) {
   const { theme } = useAppTheme();
   const themeColors = Colors[theme];
-  const { total, completed, percentage } = useCategoryTopicStore(
-    (state) => state.getTopicProgress(topic.id)
-  );
+  const topicTasks = useCategoryTopicStore((state) => state.topicTasks);
+
+  const { total, completed, percentage } = useMemo(() => {
+    const tasks = topicTasks.filter((t) => t.topicId === topic.id);
+    const total = tasks.length;
+    if (total === 0) return { total: 0, completed: 0, percentage: 0 };
+    const completed = tasks.filter((t) => t.isCompleted).length;
+    return {
+      total,
+      completed,
+      percentage: Math.round((completed / total) * 100),
+    };
+  }, [topicTasks, topic.id]);
 
   return (
     <TouchableOpacity
@@ -88,3 +98,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+

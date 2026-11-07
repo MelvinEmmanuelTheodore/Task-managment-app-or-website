@@ -45,7 +45,7 @@ export default function TimetableScreen() {
   useEffect(() => {
     loadInitialData();
     loadInitialBlocks();
-  }, [loadInitialData, loadInitialBlocks]);
+  }, []);
 
   const activeBlocks = getBlocksForDate(selectedDate);
 

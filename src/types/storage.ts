@@ -12,3 +12,4 @@ export interface StoredDataEnvelope {
   timetableBlocks: TimetableBlock[];
   settings: UserSettings;
 }
+

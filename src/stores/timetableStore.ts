@@ -11,7 +11,7 @@ interface TimetableState {
   isLoading: boolean;
 
   // Actions
-  loadInitialBlocks: () => Promise<void>;
+  loadInitialBlocks: (force?: boolean) => Promise<void>;
   setSelectedDate: (date: string) => void;
   addBlock: (params: {
     title: string;
@@ -35,7 +35,10 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
   selectedDate: getCurrentISTDate(),
   isLoading: true,
 
-  loadInitialBlocks: async () => {
+  loadInitialBlocks: async (force = false) => {
+    if (!force && get().blocks.length > 0) {
+      return;
+    }
     set({ isLoading: true });
     const blocks = await storageAdapter.getTimetableBlocks();
     set({ blocks, isLoading: false });
@@ -90,3 +93,4 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   },
 }));
+
