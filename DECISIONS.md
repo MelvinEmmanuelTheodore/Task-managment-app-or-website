@@ -189,4 +189,8 @@ This document records architectural choices, evaluation of alternatives, and imp
 3. **EAS Development Build Profile:**
    - Created `eas.json` configuring `developmentClient: true` and `distribution: "internal"` under the `development` build profile.
 4. **Validation:**
-   - Ran `npm test` (50 unit tests passing), `npm run typecheck` (clean), `npx expo config --type public` (valid), and `npx expo export --platform web` (10 bundles, 11 static routes exported cleanly).
+   - Ran `npm test` (50 unit tests passing), `npm run typecheck` (clean), `npx expo config --type public` (valid), and `npx expo export --platform web` (10 bundles, 11 static routes exported cleanly). Full native Android Gradle build verification remains pending development build execution (REV-022: Partially Verified).
+5. **Google Services File Timing:**
+   - The actual `google-services.json` file and `android.googleServicesFile` in `app.json` will be added in Step B2 after Firebase project creation.
+6. **Google Sign-In 17.0.0 Review:**
+   - Consideration regarding Android 14+ Credential Manager deprecations and Play Services requirements will be reviewed before Step B3 implementation (REV-023).

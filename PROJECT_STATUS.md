@@ -1,7 +1,7 @@
 # Project Status
 
 **Current Phase:** Phase 1 (Foundation & Setup)  
-**Status:** In Progress — Step B1 (EAS Dev Client Dependencies & Config) Completed on `feat/topics-tasks-timetable` (50 Unit Tests Passing, Typecheck Passing, Expo Web Export Passing; Step B0 Remains Unmerged with REV-018 Deferred)  
+**Status:** In Progress — Step B1 (Dependencies & Config) Completed on `feat/topics-tasks-timetable` (Android Native Build Verification Pending; Step B0 Remains Unmerged with REV-018 Deferred)  
 **Last Updated:** 2026-11-07  
 
 ---
@@ -29,9 +29,9 @@
   - [x] 6. Consolidated cascade and move logic in storage adapter returning updated envelope
   - [x] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
 - [ ] **Milestone B: Firebase, Cloud Sync & Google Auth**
-  - [x] **Step B1: Dependencies, Config Plugins & EAS Dev Client Preparation** *(Completed on `feat/topics-tasks-timetable`; `expo-dev-client@~58.0.18`, `@react-native-firebase/*@^27.1.0`, `@react-native-google-signin/google-signin@^17.0.0`, `firebase@^13.2.0`; `eas.json` created; Expo config validated; 50 tests pass; typecheck clean; web export clean)*
-  - [ ] **Step B2: Firebase Project Setup, Security Rules & Emulator Testing** *(Awaiting explicit user region confirmation and approval before creation)*
-  - [ ] **Step B3: Authentication Service & Auth Gate UI**
+  - [x] **Step B1: Dependencies, Config Plugins & EAS Dev Client Preparation** *(Dependency and configuration setup completed on `feat/topics-tasks-timetable`; `expo-dev-client@~58.0.18`, `@react-native-firebase/*@^27.1.0`, `@react-native-google-signin/google-signin@^17.0.0`, `firebase@^13.2.0`; `eas.json` created; Expo config validated; 50 tests pass; typecheck clean; web export clean; Android native compilation verification pending development build execution)*
+  - [ ] **Step B2: Firebase Project Setup, Security Rules & Emulator Testing** *(Awaiting explicit user region confirmation and approval before creation; actual google-services.json and android.googleServicesFile to be configured here)*
+  - [ ] **Step B3: Authentication Service & Auth Gate UI** *(Review Google Sign-In 17.0.0 Credential Manager consideration before implementation)*
   - [ ] **Step B4: Firestore Service Abstraction Layer**
   - [ ] **Step B5: Resumable Local-to-Cloud Migration & Replace-All Rollback**
   - [ ] **Step B6: Offline Sync, Real-Time Persistence & Conflict Resolution**
@@ -51,9 +51,11 @@
 
 ## 2. Immediate Blockers & Preserved Open Issues
 1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 is not marked as fully approved and remains unmerged on `feat/topics-tasks-timetable`.
-2. **Preserved Stage Blockers for Milestone B:**
+2. **Google Services File Timing:** The actual `google-services.json` file and the `android.googleServicesFile: "./google-services.json"` property in `app.json` will be added in Step B2 once the Firebase project has been created and the real configuration file is downloaded from the Firebase Console. Currently, the template `google-services.json.example` is checked in, and `.gitignore` ensures real credentials will not be leaked.
+3. **Preserved Stage Blockers for Milestone B:**
    - **REV-019 (Step B2 Blocker):** Firestore history validation and append-only enforcement in Security Rules.
    - **REV-020 (Step B2 Blocker):** Real calendar-date validation in Security Rules (handling invalid leap years and out-of-range days).
    - **REV-021 (Step B5 Blocker):** Replace-All rollback safety, failure recovery, and audit session tracking.
-   - **REV-022 (Step B1/Build Blocker):** Verified dependency compatibility for New Architecture Android native builds.
-3. **Current Gate:** Step B1 implementation is complete. All automated checks (`npm test`, `npm run typecheck`, `npx expo config --type public`, `npx expo export --platform web`) pass cleanly. Waiting for ChatGPT and user review before initiating Step B2.
+   - **REV-022 (Step B1 Partially Verified):** Dependency and platform configuration completed and validated across TS, Expo config, and web export; Android native build verification (Gradle compilation / TurboModules codegen) remains pending development build execution.
+   - **REV-023 (Step B3 Blocker / Consideration):** Review Google Sign-In 17.0.0 legacy Android SDK vs modern Android 14+ Credential Manager requirements and Play Services auth configurations before implementing `auth.native.ts`.
+4. **Current Gate:** Step B1 dependency/config setup is complete. All automated checks (`npm test`, `npm run typecheck`, `npx expo config --type public`, `npx expo export --platform web`) pass cleanly. Waiting for review before proceeding to Step B2.
