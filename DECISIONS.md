@@ -168,3 +168,25 @@ This document records architectural choices, evaluation of alternatives, and imp
 6. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter` in `src/services/storage/index.ts`.
 7. **Clean Domain Model & Unified Cascade State:** Drop redundant `UserSettings.categories`, deep-copy initial defaults. Adapter cascade/move methods return updated `StoredDataEnvelope`; stores update state directly from returned envelope (no cross-store `setState` hacks).
 8. **Gapped sortOrder with Move Retry:** Items spaced by multiples of 1024, writing only the moved item on normal moves. When a gap collapses (or at top when `sortOrder <= 1`), re-normalize the array first, retry the requested move, and save the array with the moved item in its exact intended visible position. Deterministic tie-break via `(sortOrder, id.localeCompare)`.
+
+
+---
+
+## Decision 017 — Step B1: EAS Development Build Dependencies, Config Plugins & Configuration
+**Date:** 2026-11-07  
+**Status:** Implemented on `feat/topics-tasks-timetable` — Awaiting Review  
+
+**Decision:**
+1. **Dependency Alignment for Expo SDK 58 & React Native 0.88.1:**
+   - Corrected `expo-dev-client` from obsolete `~5.0.x` to the official SDK-compatible version `~58.0.18`.
+   - Installed Invertase React Native Firebase suite (`@react-native-firebase/app@^27.1.0`, `@react-native-firebase/auth@^27.1.0`, `@react-native-firebase/firestore@^27.1.0`) which natively supports React Native 0.88.1, React 19.3.0, and the New Architecture (TurboModules / Bridgeless).
+   - Installed `@react-native-google-signin/google-signin@^17.0.0` with full TurboModules support.
+   - Installed `firebase@^13.2.0` (modular Web JS SDK) for pure JavaScript browser execution.
+2. **Expo Config Plugins & Android Package Alignment:**
+   - Configured `plugins` in `app.json` for `@react-native-firebase/app`, `@react-native-firebase/auth`, and `@react-native-google-signin/google-signin`.
+   - Ensured Android package name is strictly `com.melvin.timemanagementapp`.
+   - Created `google-services.json.example` template with package identifier and verified `.gitignore` prevents secret exposure.
+3. **EAS Development Build Profile:**
+   - Created `eas.json` configuring `developmentClient: true` and `distribution: "internal"` under the `development` build profile.
+4. **Validation:**
+   - Ran `npm test` (50 unit tests passing), `npm run typecheck` (clean), `npx expo config --type public` (valid), and `npx expo export --platform web` (10 bundles, 11 static routes exported cleanly).

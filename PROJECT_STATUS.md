@@ -1,7 +1,7 @@
 # Project Status
 
 **Current Phase:** Phase 1 (Foundation & Setup)  
-**Status:** In Progress — Step B0 Hardening Revisions Implemented on `feat/topics-tasks-timetable` (Automated Tests Passing; Review & Physical Device Verification Pending)  
+**Status:** In Progress — Step B1 (EAS Dev Client Dependencies & Config) Completed on `feat/topics-tasks-timetable` (50 Unit Tests Passing, Typecheck Passing, Expo Web Export Passing; Step B0 Remains Unmerged with REV-018 Deferred)  
 **Last Updated:** 2026-11-07  
 
 ---
@@ -20,7 +20,7 @@
   - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
   - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
-- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Remaining `migrateVersion()` validation issue recorded as DEFERRED / KNOWN ISSUE; Step B0 remains unmerged into `main`)*
+- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Remaining `migrateVersion()` validation issue recorded as DEFERRED / KNOWN ISSUE REV-018; Step B0 remains unmerged into `main`)*
   - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
   - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`
   - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), mandatory external backup export enforcement & internal rollback snapshot verification
@@ -28,11 +28,14 @@
   - [x] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
   - [x] 6. Consolidated cascade and move logic in storage adapter returning updated envelope
   - [x] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
-- [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build *(Postponed to Milestone B)*
-- [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B)*
-- [ ] Step 4: Data Layer & Offline Sync
-- [ ] Step 5: JSON Import with verified pre-backup
-- [ ] Step 6: Task Creation/Edit Form with Validation
+- [ ] **Milestone B: Firebase, Cloud Sync & Google Auth**
+  - [x] **Step B1: Dependencies, Config Plugins & EAS Dev Client Preparation** *(Completed on `feat/topics-tasks-timetable`; `expo-dev-client@~58.0.18`, `@react-native-firebase/*@^27.1.0`, `@react-native-google-signin/google-signin@^17.0.0`, `firebase@^13.2.0`; `eas.json` created; Expo config validated; 50 tests pass; typecheck clean; web export clean)*
+  - [ ] **Step B2: Firebase Project Setup, Security Rules & Emulator Testing** *(Awaiting explicit user region confirmation and approval before creation)*
+  - [ ] **Step B3: Authentication Service & Auth Gate UI**
+  - [ ] **Step B4: Firestore Service Abstraction Layer**
+  - [ ] **Step B5: Resumable Local-to-Cloud Migration & Replace-All Rollback**
+  - [ ] **Step B6: Offline Sync, Real-Time Persistence & Conflict Resolution**
+- [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B native testing)*
 - [ ] Step 7: Routine Templates & 7-Day Rolling Generation
 - [ ] Step 8: Multi-View Task Lists (Daily, Weekly, Monthly)
 - [ ] Step 9: Dashboard Timeline Integration
@@ -46,6 +49,11 @@
 
 ---
 
-## 2. Immediate Blockers & Action Items
-1. **Deferred B0 Known Issue:** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 is not marked as fully approved and remains unmerged on `feat/topics-tasks-timetable`.
-2. **Current Focus — Milestone B Planning:** Reviewing existing architecture and preparing a comprehensive Milestone B implementation plan (Firebase, Google Auth, Firestore, Security Rules, Local-to-Cloud Migration, Offline Behavior, Conflict Handling, Cost Controls) for ChatGPT technical review and user approval prior to any code changes.
+## 2. Immediate Blockers & Preserved Open Issues
+1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 is not marked as fully approved and remains unmerged on `feat/topics-tasks-timetable`.
+2. **Preserved Stage Blockers for Milestone B:**
+   - **REV-019 (Step B2 Blocker):** Firestore history validation and append-only enforcement in Security Rules.
+   - **REV-020 (Step B2 Blocker):** Real calendar-date validation in Security Rules (handling invalid leap years and out-of-range days).
+   - **REV-021 (Step B5 Blocker):** Replace-All rollback safety, failure recovery, and audit session tracking.
+   - **REV-022 (Step B1/Build Blocker):** Verified dependency compatibility for New Architecture Android native builds.
+3. **Current Gate:** Step B1 implementation is complete. All automated checks (`npm test`, `npm run typecheck`, `npx expo config --type public`, `npx expo export --platform web`) pass cleanly. Waiting for ChatGPT and user review before initiating Step B2.
