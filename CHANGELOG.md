@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Step 1 Scaffolding Complete:**
+  - Initialized Expo SDK 58 + React Native 0.88 + TypeScript project with Expo Router v58.
+  - Installed cross-platform dependencies: `react-native-safe-area-context`, `react-native-screens`, `react-native-web`, `react-dom`, `@expo/metro-runtime`, and `zustand`.
+  - Configured file-based navigation layout with tabbed routes: Dashboard (`/`), Timetable (`/tasks`), and Settings (`/settings`).
+  - Added modular types (`Task`, `RoutineTemplate`, `UserSettings`, `AppTimestamp`), constants (categories, colors, default routine blocks), and date/IST formatting helpers.
+  - Verified static web export (`expo export --platform web`) and strict TypeScript compilation (`tsc --noEmit`).
 - **Multi-AI Documentation Suite:** Created `PROJECT_BRIEF.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `PROJECT_STATUS.md`, `CHANGELOG.md`, `REVIEW_QUEUE.md`, and `AI_WORKFLOW.md`.
 - **Git Security:** Added `.env.example` template and hardened `.gitignore` for `.env*`, `.firebase/`, logs, keystores, signing keys, service accounts, and Firebase config files.
 - **Decoupled Timestamp Model:** Defined agnostic, serialisable `AppTimestamp` domain interface, eliminating direct SDK coupling to `firebase/firestore` Timestamp class and ensuring compile compatibility with `@react-native-firebase/firestore`.

@@ -11,8 +11,8 @@
 - [x] Multi-AI Workflow & Documentation Governance Established
 - [x] Environment Prerequisites Setup (Git & Node.js installed on host system)
 - [x] Local Git Repository Initialized & Synced with Remote (`main` branch on GitHub)
-- [ ] Step 1: Expo React Native + TypeScript Project Scaffolding *(In Progress)*
-- [ ] Step 2: Theme, Navigation & Base UI Components
+- [x] Step 1: Expo React Native + TypeScript Project Scaffolding
+- [ ] Step 2: Theme, Navigation & Base UI Components *(Approved — Next Step)*
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification
 - [ ] Step 4: Data Layer & Offline Sync
@@ -32,5 +32,5 @@
 ---
 
 ## 2. Immediate Blockers & Action Items
-1. **Active Step:** Execute **Step 1: Expo Project Scaffolding**.
-2. **Next Milestone:** Test app running in browser and on Android phone via Expo Go, then stop for user review before Step 2.
+1. **User Review Required:** Step 1 scaffolding is complete, verified with TypeScript strict type checking and successful static web export.
+2. **Next Milestone:** Awaiting user sign-off after testing the app in the browser and on Android phone via Expo Go, before commencing Step 2 (Base UI Components & Enhanced Navigation).
