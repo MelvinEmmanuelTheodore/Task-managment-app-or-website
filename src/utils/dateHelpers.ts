@@ -58,3 +58,78 @@ export function formatDateIST(dateStr: string): string {
     year: 'numeric',
   }).format(d);
 }
+
+/** Add or subtract days from a "YYYY-MM-DD" string */
+export function addDays(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+/** Get Monday of the week for a given date */
+export function getStartOfWeek(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  const dayOfWeek = d.getUTCDay(); // 0 is Sunday, 1 is Monday...
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+  return d.toISOString().split('T')[0];
+}
+
+/** Get Sunday of the week for a given date */
+export function getEndOfWeek(dateStr: string): string {
+  return addDays(getStartOfWeek(dateStr), 6);
+}
+
+export interface WeekDayInfo {
+  date: string;
+  dayName: string;
+  dayNumber: number;
+  isToday: boolean;
+}
+
+/** Get all 7 days (Monday to Sunday) for the week containing dateStr */
+export function getWeekDays(dateStr: string): WeekDayInfo[] {
+  const mondayStr = getStartOfWeek(dateStr);
+  const todayStr = getCurrentISTDate();
+  const days: WeekDayInfo[] = [];
+
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  for (let i = 0; i < 7; i++) {
+    const curDate = addDays(mondayStr, i);
+    const dayNum = parseInt(curDate.split('-')[2], 10);
+    days.push({
+      date: curDate,
+      dayName: dayNames[i],
+      dayNumber: dayNum,
+      isToday: curDate === todayStr,
+    });
+  }
+
+  return days;
+}
+
+/** Format week range for header display: e.g. "9 Nov – 15 Nov 2026" */
+export function formatWeekRange(startDateStr: string, endDateStr: string): string {
+  const [sY, sM, sD] = startDateStr.split('-').map(Number);
+  const [eY, eM, eD] = endDateStr.split('-').map(Number);
+  const startD = new Date(Date.UTC(sY, sM - 1, sD));
+  const endD = new Date(Date.UTC(eY, eM - 1, eD));
+
+  const startFormatted = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+  }).format(startD);
+
+  const endFormatted = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(endD);
+
+  return `${startFormatted} – ${endFormatted}`;
+}

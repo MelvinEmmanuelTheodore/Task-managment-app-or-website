@@ -194,3 +194,32 @@ This document records architectural choices, evaluation of alternatives, and imp
    - The actual `google-services.json` file and `android.googleServicesFile` in `app.json` will be added in Step B2 after Firebase project creation.
 6. **Google Sign-In 17.0.0 Review:**
    - Consideration regarding Android 14+ Credential Manager deprecations and Play Services requirements will be reviewed before Step B3 implementation (REV-023).
+
+
+---
+
+## Decision 018 — Core Local Timetable Feature Architecture
+**Date:** 2026-11-08  
+**Status:** Implemented on `feat/topics-tasks-timetable` — Tested & Verified  
+
+**Decision:**
+1. **Daily and Weekly Views:**
+   - Implemented a unified top-level view toggle (`Day` vs `Week`).
+   - Daily view includes Day Navigator (`Prev`, `Today`, `Next`), friendly IST date formatting, and a Quick Week Day Strip (Mon–Sun) with active dot indicators.
+   - Weekly view provides a 7-day grouped schedule overview with week metrics (total blocks, planned hours, completed blocks) and day-level block cards.
+2. **Entity Linkages:**
+   - Extended `TimetableBlock` to optionally link to `topicId` (foreign key -> `Topic`) and `taskId` (foreign key -> `TopicTask`), reusing existing app categories and topics without duplicating schema.
+3. **Live Overlap & Conflict Detection:**
+   - Implemented `hasOverlap` and `findConflictingBlocks` in `src/utils/timetableValidators.ts`.
+   - Real-time conflict banners warn users inside both the block creation/editing modal and the quick reschedule modal when a proposed time slot collides with an existing active block on the same date.
+   - Timetable block cards visually flag overlapping blocks with a warning badge (`⚠️ Overlap`).
+4. **Completion Status Toggles:**
+   - Supported statuses: `pending`, `completed`, and `skipped`.
+   - Block cards provide one-tap actions to toggle between `Done`, `Skip`, and `Reset to Pending`.
+   - Daily view features status filter pills (`All`, `Pending`, `Completed`, `Skipped`).
+5. **Move & Reschedule Controls:**
+   - Quick "Move" modal allows shifting blocks to a new date (with Today, Tomorrow, +1 Week shortcuts) and start time, checking for conflicts before saving.
+   - Full block editing supports start time, end time, and duration synchronization.
+6. **Persistence & Verification:**
+   - Full persistence through `AsyncStorageAdapter`. Survives app restarts.
+   - 20 new dedicated unit tests in `src/__tests__/timetable.test.ts` (70 total tests across all suites passing).

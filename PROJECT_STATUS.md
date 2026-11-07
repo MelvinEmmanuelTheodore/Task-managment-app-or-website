@@ -17,9 +17,9 @@
   - [x] Safe Category Deletion & Dependency Migration (accurate counts, cascade delete or move to another category)
   - [x] Topic Tasks (Full CRUD, title, priority, due date, notes editing, completion toggle, progress calculation)
   - [x] Dashboard with active topics grouped by category priority with pure presentational cards
-  - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
+  - [x] Interactive Daily & Weekly Timetable (Daily view with day-strip navigation, Weekly view with 7-day schedule & metrics, live conflict/overlap detection, topic & task linkages, completion status toggles [pending/completed/skipped], quick reschedule, and local persistence)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
-  - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
+  - [x] Unit test suite (70 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `timetable.test.ts`)
 - [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Remaining `migrateVersion()` validation issue recorded as DEFERRED / KNOWN ISSUE REV-018; Step B0 remains unmerged into `main`)*
   - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
   - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`

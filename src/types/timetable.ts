@@ -1,11 +1,11 @@
 import { AppTimestamp } from './task';
 import { Priority } from './category';
 
+export type BlockStatus = 'pending' | 'in_progress' | 'completed' | 'done' | 'skipped' | 'cancelled';
+
 /**
- * TimetableBlock is a documented subset of the approved Task schema.
- * Active in Milestone A: id, title, categoryId, priority, date, startTime, durationMin, isFixed, notes, timestamps.
- * Deferred to Step 3/4 and Step 10: status, actualStart, actualEnd, actualHistory, isFromTemplate, recurrenceRule, reminderMinutesBefore.
- * Stored JSON includes optional nullable placeholders for deferred fields to guarantee non-breaking forward compatibility.
+ * TimetableBlock represents a scheduled time block in the daily/weekly schedule.
+ * It links to categories, topics, and tasks.
  */
 export interface TimetableBlock {
   id: string;               // e.g. "blk_1"
@@ -20,10 +20,15 @@ export interface TimetableBlock {
   createdAt: AppTimestamp;
   updatedAt: AppTimestamp;
 
-  // Forward-compatible deferred placeholders
-  status?: 'pending' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
+  // Linkages to domain entities
+  topicId?: string;         // Foreign key -> Topic.id (optional)
+  taskId?: string;          // Foreign key -> TopicTask.id (optional)
+
+  // Completion status
+  status?: BlockStatus;
+
+  // Forward-compatible execution timing placeholders
   actualStart?: AppTimestamp | null;
   actualEnd?: AppTimestamp | null;
   actualHistory?: unknown[];
 }
-
