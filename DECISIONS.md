@@ -154,13 +154,13 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 016 — Step B0: Milestone A Hardening & Resilience Specifications
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting Review (Claude & ChatGPT)  
+**Status:** Proposed — Awaiting Review (User, Claude & ChatGPT)  
 
 **Decision:** Prior to starting Milestone B (Firebase), execute Step B0 hardening on `feat/topics-tasks-timetable`:
-1. **Corruption Protection & Write-Lock:** On JSON parse error or unsupported future schema version, preserve raw data at `@time_mgmt_app_data_recovery_<timestamp>`, lock writes, and offer UI options to export raw data or explicitly reset.
-2. **Verified File Export:** Verify written file existence, non-zero size, and parseability on Android before showing success and triggering `expo-sharing`.
-3. **Validated Import & Pre-Backup:** Full schema validation (types, referential integrity), merge ID collision remapping, and mandatory verified pre-backup before Replace-All (aborts immediately on pre-backup failure).
-4. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter`.
-5. **Clean Domain Model:** Drop redundant `UserSettings.categories` and deep-copy initial defaults.
-6. **Unified Cascade Logic:** Consolidate all cascade/move mutations inside the storage adapter.
-7. **Gapped sortOrder:** Items spaced by multiples of 1024, writing only the moved item on reorders, with deterministic `(sortOrder, id)` tie-breaks and automatic collapse re-normalization.
+1. **SDK 58 Package Alignment & Modern File/Paths API:** Use Expo SDK 58 compatible versions (`expo-file-system: ~58.0.11`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`). Strictly use the modern `File`/`Paths` API (`new File(Paths.cache, ...)`) across all native filesystem workflows; avoid mixing with legacy `FileSystem.writeAsStringAsync`.
+2. **Corruption Protection & Recovery-Copy Failure Safety:** On JSON parse error or unsupported future schema version, preserve raw data at `@time_mgmt_app_data_recovery_<timestamp>` and lock writes. If writing the recovery copy fails, keep the original string intact under the primary key, retain in memory, keep writes locked, and NEVER initialize defaults.
+3. **Verified File Export:** Verify written file existence, non-zero size, and parseability on Android before showing success and triggering `expo-sharing`.
+4. **Validated Import & Internal Rollback Snapshot:** Full schema validation (types, referential integrity). Merge mode differentiates same logical records (resolved by `updatedAt`) from distinct colliding records (re-keyed with topological child remapping). Replace-All mode creates an **internal rollback snapshot** and aborts immediately with zero modifications if verification fails, followed by typed `REPLACE` confirmation.
+5. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter`.
+6. **Clean Domain Model & Unified Cascade:** Drop redundant `UserSettings.categories`, deep-copy initial defaults, and consolidate all cascade/move mutations inside the storage adapter.
+7. **Gapped sortOrder with Move Retry:** Items spaced by multiples of 1024, writing only the moved item on normal moves. When a gap collapses (or at top when `sortOrder <= 1`), re-normalize the array first, retry the requested move, and save the array with the moved item in its exact intended visible position. Deterministic tie-break via `(sortOrder, id.localeCompare)`.
