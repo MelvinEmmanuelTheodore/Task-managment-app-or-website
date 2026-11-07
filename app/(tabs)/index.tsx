@@ -15,7 +15,7 @@ export default function DashboardScreen() {
   const themeColors = Colors[theme];
   const todayStr = getCurrentISTDate();
 
-  const { categories, topics, isLoading, loadInitialData, getTopicsByCategory } =
+  const { categories, topics, topicTasks, isLoading, loadInitialData, getTopicsByCategory } =
     useCategoryTopicStore();
 
   useEffect(() => {
@@ -64,14 +64,24 @@ export default function DashboardScreen() {
               </Text>
             </View>
 
-            {catTopics.map((topic) => (
-              <TopicCard
-                key={topic.id}
-                topic={topic}
-                categoryColor={cat.color}
-                onPress={() => router.push(`/topic/${topic.id}` as any)}
-              />
-            ))}
+            {catTopics.map((topic) => {
+              const tasks = topicTasks.filter((t) => t.topicId === topic.id);
+              const total = tasks.length;
+              const completed = tasks.filter((t) => t.isCompleted).length;
+              const percentage = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+              return (
+                <TopicCard
+                  key={topic.id}
+                  topic={topic}
+                  categoryColor={cat.color}
+                  total={total}
+                  completed={completed}
+                  percentage={percentage}
+                  onPress={() => router.push(`/topic/${topic.id}` as any)}
+                />
+              );
+            })}
           </View>
         );
       })}
