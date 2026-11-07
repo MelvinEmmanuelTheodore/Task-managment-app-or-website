@@ -1,6 +1,6 @@
 # Review Queue & Technical Inquiry Log
 
-This document tracks technical proposals, architectural reviews, open questions, and feedback from **Claude** (Planning & Specifications), **ChatGPT** (Independent Reviewer & Verifier), and **Antigravity** (Implementation Lead).
+This document tracks technical proposals, architectural reviews, open questions, and feedback from **ChatGPT** (Architect, Technical Reviewer & Approval Authority), **User** (Final Decision-Maker & Manual Tester), and **Antigravity** (Implementation Lead & Sole Developer).
 
 ---
 
@@ -8,9 +8,9 @@ This document tracks technical proposals, architectural reviews, open questions,
 
 | ID | Item Description | Raised By | Status | Details & Proposed Solution |
 |---|---|---|---|---|
-| **REV-005** | Exact Alarm Verification (`delivery: 'alarmClock'`) on physical device | Claude & ChatGPT | **Pending Step 3.5 Test** | Requires physical device testing on Android 13/14+ to verify wake behavior. Fallback: Notifee if `expo-notifications` fails. |
-| **REV-006** | Phase 5 Serverless Cost & Backend Architecture | Claude | **Open (Deferred to Phase 5)** | Retained as UNDECIDED. We will evaluate free-tier alternatives before considering paid Cloud Functions. Keys must never appear in frontend code. |
-| **REV-017** | Step B0 Hardening Specification & Architecture Plan | User / Reviewers | **Open for Review (Claude & ChatGPT)** | Detailed 7-point hardening plan documented in `STEP_B0_PLAN.md` and Decision 016 (write-lock on corruption, verified export/import, pre-backup abort, gapped sortOrder, getStorage factory). |
+| **REV-005** | Exact Alarm Verification (`delivery: 'alarmClock'`) on physical device | ChatGPT & User | **Pending Step 3.5 Test** | Requires physical device testing on Android 13/14+ to verify wake behavior. Fallback: Notifee if `expo-notifications` fails. |
+| **REV-006** | Phase 5 Serverless Cost & Backend Architecture | ChatGPT & User | **Open (Deferred to Phase 5)** | Retained as UNDECIDED. We will evaluate free-tier alternatives before considering paid Cloud Functions. Keys must never appear in frontend code. |
+| **REV-017** | Step B0 Hardening Specification & Architecture Plan | ChatGPT & Antigravity | **Open for Review (ChatGPT & User)** | Detailed 7-point hardening plan documented in `STEP_B0_PLAN.md` and Decision 016 (write-lock on corruption, verified export/import, pre-backup abort, gapped sortOrder, getStorage factory). |
 | **REV-015** | Milestone A Entity Separation & Local Storage Architecture | User / Antigravity | **Resolved in Milestone A** | Implemented 4 entities (`Category`, `Topic`, `TopicTask`, `TimetableBlock`), transactional `AsyncStorageAdapter`, cascade delete/move safeguards, and pure serialisable `AppTimestamp`. |
 | **REV-016** | ChatGPT Milestone A Audit Gaps (Editing, Theme, Serialisation, Concurrency, Deletion, Validation) | ChatGPT | **Resolved** | Implemented category/topic/task full editing and reordering, theme storage persistence, pure `AppTimestamp` (`{ seconds, nanoseconds }`), transactional multi-record operations in `mutateEnvelope`, dual-option category deletion dialog, exact calendar date validator with leap-year handling, and 20 passing unit tests. |
 

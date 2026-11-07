@@ -1,7 +1,10 @@
-# Step B0 Implementation Plan: Milestone A Hardening (Revised)
+# Step B0 Implementation Plan: Milestone A Hardening (Final Specification)
 
 **Branch:** `feat/topics-tasks-timetable`  
-**Status:** Proposed — Awaiting Approval (User, Claude & ChatGPT)  
+**Status:** Proposed — Awaiting User Approval  
+**Architect & Technical Reviewer:** ChatGPT  
+**Developer & Operator:** Antigravity  
+**Final Decision-Maker:** User  
 **Date:** 2026-11-07  
 
 ---
@@ -37,7 +40,7 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
 
 ## 2. Seven Hardening Fixes
 
-### Fix 1: AsyncStorageAdapter: Corruption Recovery, Write-Lock & In-Place Migrations
+### Fix 1: AsyncStorageAdapter: Corruption Recovery, Write-Lock & Versioned Migrations
 - **Target Files:**
   - `src/services/storage/AsyncStorageAdapter.ts`
   - `src/types/storage.ts`
@@ -57,13 +60,17 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
     5. **UI Recovery Dialog:** Displays two options:
        - *Export/Copy Raw Corrupted Data:* Allows user to rescue raw data manually.
        - *Reset Database:* Explicit user action required to clear the lock and re-initialize.
-  - **Versioned Migration:** Introduce `migrateEnvelope(rawParsed: any): StoredDataEnvelope` with sequential schema updaters (e.g. `v1 -> v2`) rather than falling back to defaults.
+  - **Versioned Migration Safety:**
+    - Introduce `migrateEnvelope(rawParsed: any): StoredDataEnvelope` with sequential schema updaters (e.g. `v1 -> v2`).
+    - **Pre-Migration Safety Preservation:** Before migrating from v1 to v2, preserve the original raw v1 payload in `@time_mgmt_pre_migration_v1_<timestamp>`.
+    - **Never migrate locked or corrupted data.**
+    - If pre-migration preservation fails, abort migration immediately and retain the original data untouched.
 - **Tests Required:**
   - Malformed JSON string copied to recovery key, locks writes, surfaces error.
   - **Recovery-copy write failure:** verifies original value preserved under primary key, writes remain locked, and defaults are NEVER initialized.
   - Unknown future `schemaVersion` (e.g. 99) locks writes and preserves raw payload.
   - Missing storage key seeds initial defaults cleanly.
-  - Sequential schema migration upgrades payload without resetting.
+  - Pre-migration preservation: verifies v1 payload is preserved before v2 migration; failed preservation aborts migration.
 
 ---
 
@@ -80,14 +87,16 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
        - Assert `file.exists === true` and `file.size > 0`.
        - Read content back via `await file.text()` and run `JSON.parse` to verify syntactical validity.
     4. If verified, trigger `Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save Backup' })`.
-    5. Only show success message *"Backup exported and verified"* after the verification pipeline succeeds.
+    5. **Accurate Export Status Message:** After creation and verification, display:
+       > **"Backup file ready: choose where to save it."**
+       *(Do not imply that the user has saved the file merely because the native share sheet opened).*
     6. If any step fails, catch and display a clear error alert: *"Backup export failed"*.
 - **Tests Required:**
   - Mocked filesystem test verifying write, size assertion, JSON re-parse verification, and error alert on write failure.
 
 ---
 
-### Fix 3: Full Schema Validation, Internal Rollback Snapshot & Typed Import UI
+### Fix 3: Full Schema Validation, Dual Backups & Import Merge Policy
 - **Target Files:**
   - `src/utils/backupValidator.ts` (New module)
   - `src/services/storage/AsyncStorageAdapter.ts`
@@ -101,29 +110,24 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
   - **Import Preview Modal:**
     - Shows record counts before applying: Categories (N), Topics (N), Topic Tasks (N), Timetable Blocks (N).
     - User selects **Merge** or **Replace All**.
-  - **Merge Collision Policy:**
-    - **Case A: Same Logical Record (Same ID & Matching Signature):**
-      - If incoming item shares an ID and represents the same entity (e.g. category with matching name/domain):
-      - Compare `updatedAt.seconds`. If `incoming.updatedAt.seconds > local.updatedAt.seconds`, update the record; otherwise, retain local record.
-    - **Case B: Accidental ID Collision (Same ID, Distinct Entity):**
-      - If incoming item shares an ID with a local item but represents a different entity:
-      - Generate a fresh ID (`generateId()`) for the incoming entity.
-      - Record the mapping `oldId -> newId` in a remapping dictionary.
-    - **Topological Child Reference Remapping:**
-      Process entities in strict dependency order:
-      1. *Categories:* re-key collisions -> update category dictionary.
-      2. *Topics:* re-key collisions -> update `topic.categoryId = idMap[topic.categoryId] || topic.categoryId`.
-      3. *TopicTasks:* re-key collisions -> update `task.topicId = idMap[task.topicId] || task.topicId`.
-      4. *TimetableBlocks:* re-key collisions -> update `block.categoryId = idMap[block.categoryId] || block.categoryId`.
-    - **No Silent Overwrites:** Different records never overwrite each other; logical duplicates are merged strictly by `updatedAt`.
-  - **Replace-All Behavior:**
-    - **Internal Rollback Snapshot:** Before wiping, the adapter serializes the current state to `@time_mgmt_internal_rollback_snapshot_<timestamp>`. This is an internal rollback fail-safe, distinguished from external downloadable JSON backups.
-    - **Verification & Abort Policy:** Verify the internal rollback snapshot exists, is non-empty, and parses. If verification fails, **the import immediately aborts with zero changes to existing data**.
-    - **Typed Confirmation:** User must type `REPLACE` to confirm deletion of local data.
+  - **Deterministic Import Merge Policy:**
+    - **Same ID = Same Logical Record:**
+      - If an incoming entity shares an ID with an existing local entity, it represents the same logical record.
+      - Compare `updatedAt.seconds`: if `incoming.updatedAt.seconds > local.updatedAt.seconds`, incoming record wins; otherwise, retain local record.
+      - **Equal Timestamps:** If `incoming.updatedAt.seconds === local.updatedAt.seconds`, retain the existing local record.
+    - **No Automatic ID Remapping:** Do not remap IDs during Merge. Same IDs are merged deterministically; distinct IDs are added.
+    - **Idempotency:** Importing the same backup repeatedly is completely idempotent and will never create duplicates or ghost records.
+    - **Conflicting Records & Validation:** Duplicate IDs within the imported file itself or invalid parent-child relationships cause the entire import to be rejected with a descriptive error list.
+  - **Replace-All Behavior & Dual Safety Backups:**
+    1. **External Downloadable Backup:** Offer a clear prompt/button to download an external JSON backup file, with messaging:
+       > *"Please download an external backup and save it somewhere safe before replacing all data."*
+    2. **Internal Rollback Snapshot:** In addition to the external backup, the adapter serializes the current state to `@time_mgmt_internal_rollback_snapshot_<timestamp>`.
+    3. **Verification & Abort Policy:** Verify the internal snapshot exists, is non-empty, and parses. If snapshot creation or verification fails, **the Replace-All immediately aborts with zero changes to existing data**.
+    4. **Typed Confirmation:** User must type `REPLACE` in a text prompt to confirm destruction of current data.
 - **Tests Required:**
-  - Malformed backups rejected (missing arrays, invalid timestamps, duplicate IDs, orphaned foreign keys).
-  - Merge ID collisions: verifies same logical record resolved by `updatedAt`, distinct colliding record re-keyed, and child references remapped correctly.
-  - Replace-All internal rollback snapshot creation and verification.
+  - Malformed backups rejected (missing arrays, invalid timestamps, internal duplicate IDs, orphaned foreign keys).
+  - Merge policy: newer `updatedAt` wins; equal `updatedAt` keeps local; repeating merge is idempotent.
+  - Replace-All external backup offer + internal rollback snapshot verification.
   - Failed internal rollback snapshot aborts Replace-All with zero modifications to existing data.
 
 ---
@@ -159,17 +163,27 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
 
 ---
 
-### Fix 6: Consolidate Cascade & Move-Category Logic in Adapter
+### Fix 6: Consolidated Cascade & Move State via Envelope Return
 - **Target Files:**
   - `src/services/storage/IStorageAdapter.ts`
   - `src/services/storage/AsyncStorageAdapter.ts`
   - `src/stores/categoryTopicStore.ts`
+  - `src/stores/timetableStore.ts`
 - **Implementation Approach:**
-  - All cascading logic (updating topics, topic tasks, timetable blocks on category delete or move) lives strictly inside `AsyncStorageAdapter` within the sequential `mutateEnvelope` transaction.
-  - Store actions (`deleteCategoryCascade`, `moveCategoryContentsAndDelete`) delegate directly to the adapter and synchronize in-memory state.
-  - Removes duplicate filtering routines between store and storage.
+  - Adapter methods `deleteCategoryCascade(categoryId)` and `moveCategoryContentsAndDelete(fromCatId, toCatId)` return the **updated `StoredDataEnvelope`**.
+  - Stores update their in-memory state directly from the returned envelope:
+    ```typescript
+    const updatedEnvelope = await getStorage().deleteCategoryCascade(categoryId);
+    set({
+      categories: updatedEnvelope.categories,
+      topics: updatedEnvelope.topics,
+      topicTasks: updatedEnvelope.topicTasks,
+    });
+    useTimetableStore.getState().setBlocksFromEnvelope(updatedEnvelope.timetableBlocks);
+    ```
+  - **No cross-store `setState` hacks:** Timetable store exposes an explicit action `setBlocksFromEnvelope(blocks: TimetableBlock[])` to receive synchronized state cleanly.
 - **Tests Required:**
-  - Cascade delete and move-contents integration tests verifying all 4 entity collections remain consistent.
+  - Cascade delete and move-contents integration tests verifying all 4 entity collections update consistently from the returned envelope.
 
 ---
 
@@ -205,10 +219,11 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
 
 ---
 
-## 3. Reviewer Verification Checklist (For ChatGPT & Claude)
+## 3. Reviewer Verification Checklist (For ChatGPT & User)
 
 - [ ] Does the modern `File`/`Paths` API specification prevent legacy mixing?
-- [ ] Is the merge collision distinction (same entity `updatedAt` vs distinct entity re-keying + child remapping) clear and safe?
+- [ ] Is the merge collision policy (same ID = same record, newer `updatedAt` wins, equal `updatedAt` keeps local, idempotent) deterministic and safe?
+- [ ] Are dual backups for Replace-All (user-facing external export + verified internal rollback snapshot) clearly separated?
+- [ ] Does the pre-migration preservation policy guarantee zero risk when upgrading from v1 to v2?
+- [ ] Does the envelope-return pattern eliminate cross-store `setState` hacks?
 - [ ] Does the re-normalize and retry strategy for gap collapse guarantee the requested visible order?
-- [ ] Is the internal rollback snapshot terminology and abort policy distinct from external backups?
-- [ ] Does the recovery-copy failure policy guarantee zero silent resets?

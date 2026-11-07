@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Step B0 Hardening Architecture Specification & Two-AI Governance Updates (`feat/topics-tasks-timetable`):**
+  - Updated `AI_WORKFLOW.md` to formalize the two-AI governance model (ChatGPT as Architect/Reviewer, Antigravity as Sole Developer/Git Operator, User as Decision-Maker & Manual Tester).
+  - Revised `STEP_B0_PLAN.md` and `DECISIONS.md` (Decision 016):
+    - Strict adherence to Expo SDK 58 compatible versions (`expo-file-system: ~58.0.11`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`) and modern `File`/`Paths` API without legacy mixing.
+    - Deterministic Import Merge policy (same ID = same record, newer `updatedAt` wins, equal `updatedAt` retains local, idempotent, rejects duplicate internal IDs and broken foreign keys).
+    - Replace-All dual safety backups: user-facing downloadable external backup prompt + separate verified internal rollback snapshot with abort on failure, plus typed `REPLACE` confirmation.
+    - Pre-migration raw v1 state preservation before migrating to v2; aborts if preservation fails; blocks migrations while storage is locked.
+    - Storage factory `getStorage(): IStorageAdapter` for dependency decoupling.
+    - Cascade/move state synchronization via envelope return from storage adapter, avoiding cross-store `setState` hacks.
+    - Accurate export messaging: *"Backup file ready: choose where to save it."*
+    - Gapped `sortOrder` (multiples of 1024) with automatic re-normalization and retry on gap collapse.
+
+### Added
 - **Milestone A — Interactive Core Audit Fixes (`feat/topics-tasks-timetable`):**
   - **Category & Topic Full Editing & Reordering:** Added modal editing for category renaming, priority changing, and color selection; topic editing for renaming and priority changes; added Up/Down ordering controls for both categories and topics (`moveCategoryOrder`, `moveTopicOrder`) with persistent sort order.
   - **Category Deletion & Content Migration Dialog:** Enhanced deletion dialog with accurate real-time dependency counts (topics, topic tasks, timetable blocks). Implemented two clear paths: cascade deletion of all dependencies or moving all contents to another chosen category, with immediate updates to persistent storage and both in-memory Zustand stores (`categoryTopicStore` and `timetableStore`).

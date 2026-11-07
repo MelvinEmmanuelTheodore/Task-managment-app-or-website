@@ -154,13 +154,17 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 016 — Step B0: Milestone A Hardening & Resilience Specifications
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting Review (User, Claude & ChatGPT)  
+**Status:** Proposed — Awaiting Review (User & ChatGPT)  
 
 **Decision:** Prior to starting Milestone B (Firebase), execute Step B0 hardening on `feat/topics-tasks-timetable`:
 1. **SDK 58 Package Alignment & Modern File/Paths API:** Use Expo SDK 58 compatible versions (`expo-file-system: ~58.0.11`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`). Strictly use the modern `File`/`Paths` API (`new File(Paths.cache, ...)`) across all native filesystem workflows; avoid mixing with legacy `FileSystem.writeAsStringAsync`.
 2. **Corruption Protection & Recovery-Copy Failure Safety:** On JSON parse error or unsupported future schema version, preserve raw data at `@time_mgmt_app_data_recovery_<timestamp>` and lock writes. If writing the recovery copy fails, keep the original string intact under the primary key, retain in memory, keep writes locked, and NEVER initialize defaults.
-3. **Verified File Export:** Verify written file existence, non-zero size, and parseability on Android before showing success and triggering `expo-sharing`.
-4. **Validated Import & Internal Rollback Snapshot:** Full schema validation (types, referential integrity). Merge mode differentiates same logical records (resolved by `updatedAt`) from distinct colliding records (re-keyed with topological child remapping). Replace-All mode creates an **internal rollback snapshot** and aborts immediately with zero modifications if verification fails, followed by typed `REPLACE` confirmation.
-5. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter`.
-6. **Clean Domain Model & Unified Cascade:** Drop redundant `UserSettings.categories`, deep-copy initial defaults, and consolidate all cascade/move mutations inside the storage adapter.
-7. **Gapped sortOrder with Move Retry:** Items spaced by multiples of 1024, writing only the moved item on normal moves. When a gap collapses (or at top when `sortOrder <= 1`), re-normalize the array first, retry the requested move, and save the array with the moved item in its exact intended visible position. Deterministic tie-break via `(sortOrder, id.localeCompare)`.
+3. **Verified File Export & Accurate Messaging:** Verify written file existence, non-zero size, and parseability on Android before showing success and triggering `expo-sharing`. Show message *"Backup file ready: choose where to save it."*
+4. **Validated Import, Deterministic Merge & Dual Replace-All Backups:**
+   - Full schema validation (types, referential integrity, reject duplicate internal IDs).
+   - **Merge Policy:** Same ID represents the same logical record. Compare `updatedAt` (`updatedAt.seconds`); newer incoming record wins. Equal timestamps retain local data. Do not automatically remap IDs. Repeated imports are idempotent.
+   - **Replace-All Dual Backups:** Offer external downloadable JSON backup with guidance to save safely; create a separate internal rollback snapshot (`@time_mgmt_internal_rollback_snapshot_<timestamp>`) and verify it. If internal snapshot creation or verification fails, abort immediately with zero changes. Require typed `REPLACE` confirmation.
+5. **Versioned Migration Safety:** Before migrating v1 to v2, preserve raw v1 data at `@time_mgmt_pre_migration_v1_<timestamp>`. If preservation fails, abort migration and keep v1 intact. Never run migrations while storage is locked.
+6. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter` in `src/services/storage/index.ts`.
+7. **Clean Domain Model & Unified Cascade State:** Drop redundant `UserSettings.categories`, deep-copy initial defaults. Adapter cascade/move methods return updated `StoredDataEnvelope`; stores update state directly from returned envelope (no cross-store `setState` hacks).
+8. **Gapped sortOrder with Move Retry:** Items spaced by multiples of 1024, writing only the moved item on normal moves. When a gap collapses (or at top when `sortOrder <= 1`), re-normalize the array first, retry the requested move, and save the array with the moved item in its exact intended visible position. Deterministic tie-break via `(sortOrder, id.localeCompare)`.
