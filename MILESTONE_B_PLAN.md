@@ -1,12 +1,13 @@
 # Milestone B Implementation Plan: Firebase, Google Auth & Cloud Sync
 
 > [!IMPORTANT]
-> **Status:** PROPOSED (Revision 2 with Critical Security, Migration & Concurrency Feedback) — Awaiting Technical Review by ChatGPT and Approval by User.  
-> **Strict Rules:**
-> 1. No application code changes, package installations, or Firebase cloud resource creations will take place until this plan is formally approved.
-> 2. Step B0 deferred validation issue (REV-018) remains documented as a KNOWN ISSUE.
-> 3. Step B0 is not marked approved and will not be merged into `main` until separately resolved.
-> 4. Milestone B implementation remains strictly blocked until Step B0 is approved.
+> **Status:** Step B1 Implementation Completed & Accepted; Proposed Stages (B2–B6) Awaiting Approval.  
+> **Governance & Operational Boundaries:**
+> 1. **Step B1 Status:** B1 dependency setup and Android development-build preparation were authorised under a limited exception and implementation has been accepted.
+> 2. **Step B0 & Main Branch:** Step B0 remains unapproved and unmerged into `main`. The `migrateVersion()` validation issue remains deferred as a known issue (REV-018).
+> 3. **Subsequent Stages Gate:** Step B2 and all subsequent stages remain strictly blocked until separate, explicit user approval.
+> 4. **Cloud Infrastructure Gate:** No Firebase project or Cloud Firestore database has been authorised or created.
+> 5. **Compatibility Verification:** REV-022 remains partially verified pending native Android build completion; REV-023 remains an architectural blocker requiring investigation before Step B3.
 
 ---
 
@@ -17,7 +18,7 @@ Milestone B transitions the Time Management application from the hardened Milest
 ### Architectural Tenets
 1. **Dual-SDK Platform Abstraction:**
    - **Android (Native):** Uses `@react-native-firebase/app`, `@react-native-firebase/auth`, and `@react-native-firebase/firestore`. Backed by native Android SQLite/LevelDB for durable offline storage that survives app termination and device reboots.
-   - **Web (Browser):** Uses modular `firebase/app`, `firebase/auth`, and `firebase/firestore` (JS SDK v11.4.0) configured with `persistentMultipleTabManager()` for robust IndexedDB browser tab persistence.
+   - **Web (Browser):** Uses modular `firebase/app`, `firebase/auth`, and `firebase/firestore` (JS SDK ^13.2.0) configured with `persistentMultipleTabManager()` for robust IndexedDB browser tab persistence.
    - **Unified Service Interface:** The application layer (Zustand stores and UI screens) interacts strictly with a platform-agnostic service interface (`firestore.ts` and `auth.ts`), resolved automatically by Metro via `.native.ts` and `.web.ts` extensions.
 2. **Strict User Isolation & Soft-Delete Tombstones:**
    - All user data is partitioned under `/users/{uid}/...` subcollections.
@@ -56,7 +57,7 @@ flowchart TD
 
     subgraph WebPlatform["Web Desktop Runtime (Browser)"]
         AUTH_WEB["auth.web.ts\n(firebase/auth popup/redirect)"]
-        FS_WEB["firestore.web.ts\n(firebase/firestore modular v11)"]
+        FS_WEB["firestore.web.ts\n(firebase/firestore modular ^13.2.0)"]
         INDEXEDDB_CACHE[("IndexedDB Multi-Tab Cache\n(persistentMultipleTabManager)")]
     end
 
@@ -647,7 +648,7 @@ gantt
 | Step | Automated Test Suite | Manual Verification Gate | Status |
 | :--- | :--- | :--- | :--- |
 | **B1** | `npm test`, `npm run typecheck`, `npx expo export --platform web` | EAS development build boots on Android device | **Partially Verified (REV-022 open until native build)** |
-| **B2** | `@firebase/rules-unit-testing` emulator suite covering hard delete rejection, soft delete, append-only history (REV-019), and foreign keys | Real `google-services.json` registered & security rules deployed | Pending B1 approval & user region selection |
+| **B2** | `@firebase/rules-unit-testing` emulator suite covering hard delete rejection, soft delete, append-only history (REV-019), and foreign keys | Real `google-services.json` registered & security rules deployed | Pending explicit user authorization & region confirmation |
 | **B3** | Auth store unit tests with mock providers | Interactive Google Sign-In & Sign-Out on Android (addressing REV-023) & Web | Pending B2 |
 | **B4** | Firestore adapter CRUD tests against Emulator | Data inspected in Firebase Emulator UI | Pending B3 |
 | **B5** | Checkpoint serialization, retry idempotency, and Replace-All rollback tests (REV-021) | Full local dataset migrated with count confirmation dialog | Pending B4 |
@@ -659,4 +660,4 @@ gantt
 
 This plan incorporates comprehensive security rules, explicit migration retry classifications, non-destructive merge logic, Replace-All rollback protections, exact installed dependencies, and user-guided region selection.
 
-**Next Action:** Await final review by ChatGPT and explicit approval from the User before initiating Step B2. No code changes, Firebase project creation, or package installations will occur until Step B2 is authorized.
+**Next Action:** Step B1 implementation has been accepted. Await final review by ChatGPT and explicit authorization from the User before initiating Step B2. No code changes, Firebase project creation, or Firestore database creation will occur until Step B2 is authorized.
