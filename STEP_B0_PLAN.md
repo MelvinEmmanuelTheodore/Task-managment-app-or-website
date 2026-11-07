@@ -96,38 +96,48 @@ To avoid fragile legacy mixing, all filesystem operations in Step B0 will strict
 
 ---
 
-### Fix 3: Full Schema Validation, Dual Backups & Import Merge Policy
+### Fix 3: Settings Import UI, Full Schema Validation, Deterministic Merge & Dual Replace-All Backups
 - **Target Files:**
   - `src/utils/backupValidator.ts` (New module)
   - `src/services/storage/AsyncStorageAdapter.ts`
   - `app/(tabs)/settings.tsx`
 - **Implementation Approach:**
-  - **Deep Schema Validation (`validateBackupPayload`):**
-    - Validates envelope structure and types (`schemaVersion`, `categories`, `topics`, `topicTasks`, `timetableBlocks`, `settings`).
-    - Validates date formats (`AppTimestamp` objects with `{ seconds, nanoseconds }`, ISO strings).
-    - Checks for duplicate IDs within each array.
-    - **Referential Integrity:** Rejects payload if any topic references a missing `categoryId`, any task references a missing `topicId`, or any timetable block references a missing `categoryId`.
-  - **Import Preview Modal:**
-    - Shows record counts before applying: Categories (N), Topics (N), Topic Tasks (N), Timetable Blocks (N).
-    - User selects **Merge** or **Replace All**.
+  - **File Selection & Reading Workflow (`expo-document-picker`):**
+    1. User taps "Import Backup" in Settings.
+    2. Open system file picker via `DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true })`.
+    3. **Cancellation Handling:** If user cancels the file picker (`result.canceled === true`), exit immediately with zero modifications and no error alerts (clean exit).
+    4. **Reading File Contents:** Read the selected file contents using the modern File API (`new File(result.assets[0].uri).text()`).
+    5. **Deep Schema Validation:** Parse JSON and validate completely with `validateBackupPayload(parsed)`:
+       - Validates envelope structure and types (`schemaVersion`, `categories`, `topics`, `topicTasks`, `timetableBlocks`, `settings`).
+       - Validates date formats (`AppTimestamp` objects with `{ seconds, nanoseconds }`, ISO strings).
+       - Checks for duplicate IDs within each array.
+       - **Referential Integrity:** Rejects payload if any topic references a missing `categoryId`, any task references a missing `topicId`, or any timetable block references a missing `categoryId`.
+    6. **Validation Failure Safety:** If JSON parsing, file read, or schema validation fails, display a clear modal/banner listing the specific validation errors. **Leave existing data completely untouched.**
+    7. **Import Preview Modal:** If validation succeeds, display the preview modal showing record counts before applying: Categories (N), Topics (N), Topic Tasks (N), Timetable Blocks (N).
+       - User selects **Merge** or **Replace All**.
   - **Deterministic Import Merge Policy:**
     - **Same ID = Same Logical Record:**
       - If an incoming entity shares an ID with an existing local entity, it represents the same logical record.
-      - Compare `updatedAt.seconds`: if `incoming.updatedAt.seconds > local.updatedAt.seconds`, incoming record wins; otherwise, retain local record.
-      - **Equal Timestamps:** If `incoming.updatedAt.seconds === local.updatedAt.seconds`, retain the existing local record.
+      - **Precise Timestamp Comparison:** Compare both `AppTimestamp.seconds` and `AppTimestamp.nanoseconds`:
+        - Incoming wins if `incoming.updatedAt.seconds > local.updatedAt.seconds`, or if `incoming.updatedAt.seconds === local.updatedAt.seconds && incoming.updatedAt.nanoseconds > local.updatedAt.nanoseconds`.
+        - Otherwise (incoming is older or timestamps are equal), retain the existing local record.
+      - **Equal Timestamps:** When `seconds` and `nanoseconds` are both identical, retain the existing local record.
     - **No Automatic ID Remapping:** Do not remap IDs during Merge. Same IDs are merged deterministically; distinct IDs are added.
     - **Idempotency:** Importing the same backup repeatedly is completely idempotent and will never create duplicates or ghost records.
     - **Conflicting Records & Validation:** Duplicate IDs within the imported file itself or invalid parent-child relationships cause the entire import to be rejected with a descriptive error list.
   - **Replace-All Behavior & Dual Safety Backups:**
-    1. **External Downloadable Backup:** Offer a clear prompt/button to download an external JSON backup file, with messaging:
-       > *"Please download an external backup and save it somewhere safe before replacing all data."*
-    2. **Internal Rollback Snapshot:** In addition to the external backup, the adapter serializes the current state to `@time_mgmt_internal_rollback_snapshot_<timestamp>`.
-    3. **Verification & Abort Policy:** Verify the internal snapshot exists, is non-empty, and parses. If snapshot creation or verification fails, **the Replace-All immediately aborts with zero changes to existing data**.
-    4. **Typed Confirmation:** User must type `REPLACE` in a text prompt to confirm destruction of current data.
+    1. **Required External Backup Step:** External backup is a mandatory prerequisite before Replace-all. The app triggers export/sharing of a full JSON backup file.
+    2. **Explicit User Acknowledgement:** Require explicit user confirmation via an acknowledgement checkbox:
+       > *"I have exported and saved a backup file to a safe external location."*
+       *(Note: The app does not claim or attempt to verify that the user completed an external file save in the OS file picker or sharing sheet; it requires explicit user acknowledgement).*
+    3. **Separate Internal Rollback Snapshot:** In addition to the required external backup step, the storage adapter serializes current state to `@time_mgmt_internal_rollback_snapshot_<timestamp>`.
+    4. **Verification & Abort Policy:** Verify the internal snapshot exists, is non-empty, and parses. If snapshot creation or verification fails, **the Replace-All immediately aborts with zero changes to existing data**.
+    5. **Typed Confirmation:** User must acknowledge the external backup save and type `REPLACE` in a text prompt to confirm destruction of current data.
 - **Tests Required:**
+  - File picker cancellation or read/validation failure leaves existing data untouched.
   - Malformed backups rejected (missing arrays, invalid timestamps, internal duplicate IDs, orphaned foreign keys).
-  - Merge policy: newer `updatedAt` wins; equal `updatedAt` keeps local; repeating merge is idempotent.
-  - Replace-All external backup offer + internal rollback snapshot verification.
+  - Merge policy: newer `updatedAt` wins comparing both `seconds` and `nanoseconds`; equal timestamps keep local; repeating merge is idempotent.
+  - Replace-All external backup required acknowledgement + verified internal rollback snapshot.
   - Failed internal rollback snapshot aborts Replace-All with zero modifications to existing data.
 
 ---

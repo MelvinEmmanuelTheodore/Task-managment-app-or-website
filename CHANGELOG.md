@@ -11,8 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Updated `AI_WORKFLOW.md` to formalize the two-AI governance model (ChatGPT as Architect/Reviewer, Antigravity as Sole Developer/Git Operator, User as Decision-Maker & Manual Tester).
   - Revised `STEP_B0_PLAN.md` and `DECISIONS.md` (Decision 016):
     - Strict adherence to Expo SDK 58 compatible versions (`expo-file-system: ~58.0.11`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`) and modern `File`/`Paths` API without legacy mixing.
-    - Deterministic Import Merge policy (same ID = same record, newer `updatedAt` wins, equal `updatedAt` retains local, idempotent, rejects duplicate internal IDs and broken foreign keys).
-    - Replace-All dual safety backups: user-facing downloadable external backup prompt + separate verified internal rollback snapshot with abort on failure, plus typed `REPLACE` confirmation.
+    - Document picker import workflow (`expo-document-picker`): select JSON, read via File API, deep schema validation (`validateBackupPayload`), preview counts, clean exit on cancel/error leaving data untouched.
+    - Deterministic Import Merge policy (same ID = same record; compare `updatedAt` across both `seconds` and `nanoseconds`; newer wins; equal timestamps retain local; idempotent; rejects duplicate internal IDs and broken foreign keys).
+    - Replace-All dual safety backups: mandatory external backup export with required user acknowledgement of saving safely (no claims of app-level verification of OS saves); separate verified internal rollback snapshot with abort on failure, plus typed `REPLACE` confirmation.
     - Pre-migration raw v1 state preservation before migrating to v2; aborts if preservation fails; blocks migrations while storage is locked.
     - Storage factory `getStorage(): IStorageAdapter` for dependency decoupling.
     - Cascade/move state synchronization via envelope return from storage adapter, avoiding cross-store `setState` hacks.

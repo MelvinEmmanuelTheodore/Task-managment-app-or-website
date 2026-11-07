@@ -23,7 +23,7 @@
 - [ ] **Step B0: Milestone A Hardening & Resilience** *(Plan documented in STEP_B0_PLAN.md & Decision 016; Awaiting Review)*
   - [ ] 1. Write-lock on storage corruption & raw recovery key preservation
   - [ ] 2. Verified export with file existence/size validation and `expo-sharing`
-  - [ ] 3. Settings import UI, deep schema validation, merge remapping & verified pre-backup abort policy
+  - [ ] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), required external backup acknowledgement & internal rollback snapshot verification
   - [ ] 4. Storage provider factory (`getStorage()`)
   - [ ] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
   - [ ] 6. Consolidated cascade and move logic in storage adapter
