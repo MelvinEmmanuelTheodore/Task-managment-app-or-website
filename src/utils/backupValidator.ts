@@ -158,17 +158,20 @@ export function validateBackupPayload(raw: unknown): ValidationResult {
       } else {
         blockIds.add(block.id);
       }
+      if (typeof block.title !== 'string' || !block.title.trim()) {
+        errors.push(`${prefix} missing valid title`);
+      }
       if (!categoryIds.has(block.categoryId)) {
         errors.push(`${prefix} references missing categoryId "${block.categoryId}"`);
+      }
+      if (typeof block.date !== 'string' || !block.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        errors.push(`${prefix} invalid date (expected YYYY-MM-DD)`);
       }
       if (typeof block.startTime !== 'string' || !block.startTime.match(/^\d{2}:\d{2}$/)) {
         errors.push(`${prefix} invalid startTime (expected HH:mm)`);
       }
-      if (typeof block.endTime !== 'string' || !block.endTime.match(/^\d{2}:\d{2}$/)) {
-        errors.push(`${prefix} invalid endTime (expected HH:mm)`);
-      }
-      if (typeof block.dayOfWeek !== 'number' || block.dayOfWeek < 0 || block.dayOfWeek > 6) {
-        errors.push(`${prefix} invalid dayOfWeek (0-6)`);
+      if (typeof block.durationMin !== 'number' || block.durationMin <= 0) {
+        errors.push(`${prefix} invalid durationMin (must be positive number)`);
       }
       if (typeof block.isFixed !== 'boolean') errors.push(`${prefix} invalid isFixed`);
       if (!isValidTimestamp(block.createdAt)) errors.push(`${prefix} invalid createdAt timestamp`);

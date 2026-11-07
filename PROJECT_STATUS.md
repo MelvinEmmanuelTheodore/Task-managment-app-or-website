@@ -20,7 +20,7 @@
   - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
   - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
-- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 38 automated tests pass; Physical Android device verification pending)*
+- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Physical Android device verification pending)*
   - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
   - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`
   - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), mandatory external backup export enforcement & internal rollback snapshot verification
@@ -47,5 +47,5 @@
 ---
 
 ## 2. Immediate Blockers & Action Items
-1. **Review & Verification:** Step B0 revisions implemented. All 38 automated unit tests and web static export pass. Physical Android device verification and approval by User and ChatGPT remain pending before merging into main or starting Milestone B.
+1. **Review & Verification:** Step B0 revisions implemented. All 50 automated unit tests and web static export pass. Physical Android device verification and approval by User and ChatGPT remain pending before merging into main or starting Milestone B.
 2. **Next Step:** Awaiting user testing and review of `feat/topics-tasks-timetable` before merging into `main`.

@@ -263,18 +263,27 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         );
       }
 
-      // 3c: Validate resulting envelope structure BEFORE writing to primary storage
-      const postMigrationError = this.validateEnvelopeStructure(currentData);
-      if (postMigrationError) {
+      // 3c: Full schema validation of resulting v2 envelope BEFORE writing to primary storage
+      const fullValidation = validateBackupPayload(currentData);
+      if (!fullValidation.isValid) {
         return this.handleCorruptedPayload(
           raw,
-          `Migration aborted: post-migration validation failed (${postMigrationError})`
+          `Migration aborted: post-migration schema validation failed (${fullValidation.errors.join('; ')})`
         );
       }
 
       // 3d: Write validated migrated data to primary storage
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
       parsed = currentData;
+    } else {
+      // Validate already-v2 data
+      const fullValidation = validateBackupPayload(parsed);
+      if (!fullValidation.isValid) {
+        return this.handleCorruptedPayload(
+          raw,
+          `Corrupted storage data: schema validation failed (${fullValidation.errors.join('; ')})`
+        );
+      }
     }
 
     // Clean legacy settings.categories if present
@@ -526,6 +535,15 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         throw new Error(`Cannot run migration: ${structureError}`);
       }
 
+      // Reject stored payloads with unsupported future schema versions
+      if (parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
+        await this.handleCorruptedPayload(
+          raw,
+          `Unknown future schema version in storage: ${parsed.schemaVersion}`
+        );
+        throw new Error(`Cannot run migration: stored payload has unknown future schema version ${parsed.schemaVersion}`);
+      }
+
       if (targetVersion > CURRENT_SCHEMA_VERSION || !MIGRATIONS[targetVersion - 1]) {
         throw new Error(`Target migration schema version ${targetVersion} is not supported by this application version`);
       }
@@ -569,14 +587,14 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         throw new Error(`Migration aborted: step execution failed (${migrationErr?.message})`);
       }
 
-      // Step 3: Validate resulting envelope structure BEFORE writing to primary storage
-      const postMigrationError = this.validateEnvelopeStructure(currentData);
-      if (postMigrationError) {
+      // Step 3: Full schema validation of resulting envelope BEFORE writing to primary storage
+      const fullValidation = validateBackupPayload(currentData);
+      if (!fullValidation.isValid) {
         await this.handleCorruptedPayload(
           raw,
-          `Migration aborted: post-migration validation failed (${postMigrationError})`
+          `Migration aborted: post-migration schema validation failed (${fullValidation.errors.join('; ')})`
         );
-        throw new Error(`Migration aborted: post-migration validation failed (${postMigrationError})`);
+        throw new Error(`Migration aborted: post-migration schema validation failed (${fullValidation.errors.join('; ')})`);
       }
 
       // Step 4: Write migrated data to primary storage

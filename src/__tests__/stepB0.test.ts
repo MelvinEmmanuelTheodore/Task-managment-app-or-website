@@ -380,13 +380,195 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       try {
         const loaded = await adapter.loadAll();
         expect(adapter.isStorageLocked()).toBe(true);
-        expect(adapter.getCorruptionError()).toContain('post-migration validation failed');
+        expect(adapter.getCorruptionError()).toContain('post-migration schema validation failed');
 
         // Primary storage remains completely untouched
         expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw);
       } finally {
         MIGRATIONS[1] = originalMigrator;
       }
+    });
+
+    it('should reject a v1 envelope with an invalid record inside a collection after migration and leave primary data unchanged', async () => {
+      // Structurally valid arrays, but category priority is invalid
+      const v1WithInvalidRecord = {
+        schemaVersion: 1,
+        categories: [
+          {
+            id: 'cat_invalid',
+            name: 'Invalid Priority Cat',
+            priority: 'super-urgent', // invalid priority
+            sortOrder: 1024,
+            color: '#000',
+            createdAt: { seconds: 1000, nanoseconds: 0 },
+            updatedAt: { seconds: 1000, nanoseconds: 0 },
+          },
+        ],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: {
+          theme: 'dark',
+          wakeUpTime: '08:00',
+          windDownTime: '22:00',
+          defaultReminderMinutesBefore: 5,
+          batteryOptimizationDismissed: false,
+          createdAt: { seconds: 1000, nanoseconds: 0 },
+          updatedAt: { seconds: 1000, nanoseconds: 0 },
+        },
+      };
+      const raw = JSON.stringify(v1WithInvalidRecord);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      // Testing through loadAll()
+      const loaded = await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('post-migration schema validation failed');
+      expect(adapter.getCorruptionError()).toContain('invalid priority');
+      expect(loaded.categories).toEqual([]);
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+
+      // Testing equivalent failure through public migrateVersion()
+      adapter.clearLock();
+      await expect(adapter.migrateVersion(2)).rejects.toThrow('post-migration schema validation failed');
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+    });
+
+    it('should reject a migrated envelope with invalid timestamps or fields and leave primary data unchanged', async () => {
+      // Structurally valid arrays, but category createdAt timestamp has invalid non-numeric fields
+      const v1WithInvalidTimestamp = {
+        schemaVersion: 1,
+        categories: [
+          {
+            id: 'cat_bad_ts',
+            name: 'Bad Timestamp Cat',
+            priority: 'high',
+            sortOrder: 1024,
+            color: '#000',
+            createdAt: { seconds: 'NaN', nanoseconds: null } as any, // invalid timestamp
+            updatedAt: { seconds: 1000, nanoseconds: 0 },
+          },
+        ],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: {
+          theme: 'dark',
+          wakeUpTime: '08:00',
+          windDownTime: '22:00',
+          defaultReminderMinutesBefore: 5,
+          batteryOptimizationDismissed: false,
+          createdAt: { seconds: 1000, nanoseconds: 0 },
+          updatedAt: { seconds: 1000, nanoseconds: 0 },
+        },
+      };
+      const raw = JSON.stringify(v1WithInvalidTimestamp);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      // Testing through loadAll()
+      await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('invalid createdAt timestamp');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+
+      // Testing through public migrateVersion()
+      adapter.clearLock();
+      await expect(adapter.migrateVersion(2)).rejects.toThrow('invalid createdAt timestamp');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+    });
+
+    it('should reject referential-integrity failure after migration (e.g. orphan topic) and leave primary data unchanged', async () => {
+      // Topic references categoryId 'cat_non_existent' which does not exist in categories
+      const v1WithOrphan = {
+        schemaVersion: 1,
+        categories: [
+          {
+            id: 'cat_real',
+            name: 'Real Cat',
+            priority: 'high',
+            sortOrder: 1024,
+            color: '#000',
+            createdAt: { seconds: 1000, nanoseconds: 0 },
+            updatedAt: { seconds: 1000, nanoseconds: 0 },
+          },
+        ],
+        topics: [
+          {
+            id: 'top_orphan',
+            categoryId: 'cat_non_existent', // Broken referential integrity
+            name: 'Orphan Topic',
+            priority: 'high',
+            sortOrder: 1024,
+            isActive: true,
+            createdAt: { seconds: 1000, nanoseconds: 0 },
+            updatedAt: { seconds: 1000, nanoseconds: 0 },
+          },
+        ],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: {
+          theme: 'dark',
+          wakeUpTime: '08:00',
+          windDownTime: '22:00',
+          defaultReminderMinutesBefore: 5,
+          batteryOptimizationDismissed: false,
+          createdAt: { seconds: 1000, nanoseconds: 0 },
+          updatedAt: { seconds: 1000, nanoseconds: 0 },
+        },
+      };
+      const raw = JSON.stringify(v1WithOrphan);
+      await AsyncStorage.setItem(STORAGE_KEY, raw);
+
+      // Testing through loadAll()
+      await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('references missing categoryId');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+
+      // Testing through public migrateVersion()
+      adapter.clearLock();
+      await expect(adapter.migrateVersion(2)).rejects.toThrow('references missing categoryId');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(raw); // Primary raw payload unchanged
+    });
+
+    it('should reject migrateVersion() when storage contains an unsupported future version or targetVersion is future, leaving primary data unchanged', async () => {
+      // 1. Storage contains future schemaVersion: 99
+      const futureStorageData = {
+        schemaVersion: 99,
+        categories: [],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: {
+          theme: 'dark',
+          wakeUpTime: '08:00',
+          windDownTime: '22:00',
+          defaultReminderMinutesBefore: 5,
+          batteryOptimizationDismissed: false,
+          createdAt: { seconds: 1000, nanoseconds: 0 },
+          updatedAt: { seconds: 1000, nanoseconds: 0 },
+        },
+      };
+      const futureRaw = JSON.stringify(futureStorageData);
+      await AsyncStorage.setItem(STORAGE_KEY, futureRaw);
+
+      await expect(adapter.migrateVersion(2)).rejects.toThrow(
+        'stored payload has unknown future schema version 99'
+      );
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('Unknown future schema version in storage: 99');
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(futureRaw); // Primary raw payload unchanged
+
+      // 2. targetVersion is future schemaVersion: 99 on valid v1 data
+      adapter.clearLock();
+      const v1Raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, v1Raw);
+
+      await expect(adapter.migrateVersion(99)).rejects.toThrow(
+        'Target migration schema version 99 is not supported by this application version'
+      );
+      expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(v1Raw); // Primary raw payload unchanged
     });
   });
 
