@@ -21,7 +21,9 @@ The application is designed to keep daily routines structured, track multi-track
 5. **Clean & Accessible UI:** High-contrast dark mode support, generous touch targets, and color-coded categorizations.
 
 ## 4. Phased Roadmap
-- **Phase 1 (Current):** Dashboard, Timetable, Tasks, Manual Tracking, Notifications & Alarms, Firestore Sync, Web Deployment, JSON Backup/Recovery.
+- **Phase 1 (Current):**
+  - **Milestone A (Interactive Core - Completed on `feat/topics-tasks-timetable`):** Category & Topic hierarchy, Topic Tasks to-do management, interactive TimetableBlocks, AsyncStorage persistence with serialized write queue, theme persistence, and JSON export.
+  - **Milestone B (Next):** Firebase Authentication, Dual-SDK Firestore sync, and Step 3.5 Real-Device Alarm test suite.
 - **Phase 2:** Domestic (India) & Overseas Job Application Trackers.
 - **Phase 3:** Intelligent Rescheduling, Buffer Allocation & Recovery Mode.
 - **Phase 4:** Habit Tracking, Time Analytics, Weekly Reviews & Performance Reports.
@@ -31,4 +33,3 @@ The application is designed to keep daily routines structured, track multi-track
 - **Claude:** Product planning, functional requirements, and feature design.
 - **ChatGPT:** Independent architectural audit, code review, debugging, and verification.
 - **Antigravity (Me):** Primary developer responsible for codebase implementation, maintenance, and Git operations upon user authorization.
-

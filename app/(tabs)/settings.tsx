@@ -1,25 +1,52 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { useAppTheme } from '../../src/stores/themeStore';
 import { Colors } from '../../src/constants/colors';
+import { storageAdapter } from '../../src/services/storage/AsyncStorageAdapter';
+import { useCategoryTopicStore } from '../../src/stores/categoryTopicStore';
+import { useTimetableStore } from '../../src/stores/timetableStore';
 
 export default function SettingsScreen() {
   const { theme, preference, setThemePreference } = useAppTheme();
   const themeColors = Colors[theme];
+
+  const { loadInitialData } = useCategoryTopicStore();
+  const { loadInitialBlocks } = useTimetableStore();
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    try {
+      const json = await storageAdapter.exportAllData();
+      if (Platform.OS === 'web') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `time_management_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setExportNotice('Backup successfully exported!');
+      setTimeout(() => setExportNotice(null), 4000);
+    } catch {
+      Alert.alert('Export Failed', 'Could not export local database.');
+    }
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: themeColors.text }]}>Settings</Text>
         <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-          App configuration and preferences
+          Appearance, local backup & milestone status
         </Text>
       </View>
 
+      {/* Theme Setting */}
       <View style={[styles.section, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
         <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Theme Appearance</Text>
         <Text style={[styles.sectionSubtitle, { color: themeColors.textSecondary }]}>
-          Choose how the interface renders across devices
+          Stored locally and persists across app restarts
         </Text>
 
         <View style={styles.buttonRow}>
@@ -51,16 +78,34 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* JSON Backup & Export */}
       <View style={[styles.section, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Project Architecture Status</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Data Backup & Export</Text>
+        <Text style={[styles.sectionSubtitle, { color: themeColors.textSecondary }]}>
+          Export all categories, topics, tasks, and timetable blocks as a JSON file
+        </Text>
+
+        <TouchableOpacity onPress={handleExport} style={[styles.actionButton, { backgroundColor: themeColors.primary }]}>
+          <Text style={styles.actionButtonText}>Export JSON Backup</Text>
+        </TouchableOpacity>
+
+        {exportNotice && (
+          <Text style={[styles.noticeText, { color: themeColors.success }]}>{exportNotice}</Text>
+        )}
+      </View>
+
+      {/* Milestone A Architecture Info */}
+      <View style={[styles.section, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Milestone A: Interactive Core</Text>
         <Text style={[styles.statusText, { color: themeColors.textSecondary }]}>
-          • Framework: Expo SDK 58 + React Native 0.88 + TypeScript{'\n'}
-          • Navigation: Expo Router file-based tabs{'\n'}
-          • Targets: Android App & Web Browser from single codebase{'\n'}
-          • State: Zustand lightweight stores{'\n'}
-          • Step 1: Complete and testable
+          • Entity Separation: Category, Topic, TopicTask, TimetableBlock{'\n'}
+          • Storage Adapter: AsyncStorageAdapter with serialised write queue{'\n'}
+          • Safety: Cascade category deletion warnings and shift confirmations{'\n'}
+          • Platform: Android & Web local interactivity
         </Text>
       </View>
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
@@ -113,9 +158,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  actionButton: {
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  noticeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'center',
+  },
   statusText: {
     fontSize: 13,
     lineHeight: 22,
-    marginTop: 6,
   },
 });

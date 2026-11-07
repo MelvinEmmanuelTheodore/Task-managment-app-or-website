@@ -1,13 +1,41 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useCategoryTopicStore } from '../../src/stores/categoryTopicStore';
 import { useAppTheme } from '../../src/stores/themeStore';
 import { Colors } from '../../src/constants/colors';
+import { TopicCard } from '../../src/components/TopicCard';
 import { formatDateIST, getCurrentISTDate } from '../../src/utils/dateHelpers';
 
+const PRIORITY_ORDER = { high: 1, medium: 2, low: 3 };
+
 export default function DashboardScreen() {
+  const router = useRouter();
   const { theme } = useAppTheme();
   const themeColors = Colors[theme];
   const todayStr = getCurrentISTDate();
+
+  const { categories, topics, isLoading, loadInitialData, getTopicsByCategory } =
+    useCategoryTopicStore();
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  if (isLoading) {
+    return (
+      <View style={[styles.center, { backgroundColor: themeColors.background }]}>
+        <ActivityIndicator size="large" color={themeColors.primary} />
+      </View>
+    );
+  }
+
+  // Categories sorted by Priority (High -> Med -> Low), then sortOrder
+  const sortedCategories = [...categories].sort((a, b) => {
+    const pDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+    if (pDiff !== 0) return pDiff;
+    return a.sortOrder - b.sortOrder;
+  });
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -17,29 +45,47 @@ export default function DashboardScreen() {
         </Text>
         <Text style={[styles.title, { color: themeColors.text }]}>Personal Dashboard</Text>
         <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-          Daily timetable, task execution, and progress tracking
+          Active topics grouped by category priority
         </Text>
       </View>
 
-      <View style={[styles.card, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-        <Text style={[styles.cardTitle, { color: themeColors.text }]}>🚀 Step 1 Scaffolding Complete</Text>
-        <Text style={[styles.cardBody, { color: themeColors.textSecondary }]}>
-          Expo Router, React Native Safe Area, TypeScript, and Zustand state are properly configured for cross-platform Android and Web execution.
-        </Text>
-      </View>
+      {sortedCategories.map((cat) => {
+        const catTopics = getTopicsByCategory(cat.id, false); // Active topics only
+        if (catTopics.length === 0) return null;
 
-      <View style={[styles.card, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-        <Text style={[styles.cardTitle, { color: themeColors.text }]}>📅 Today's Routine Preview</Text>
-        <Text style={[styles.cardBody, { color: themeColors.textSecondary }]}>
-          • 08:00 AM — Wake up & morning routine (Fixed){'\n'}
-          • 09:00 AM — Career work begins{'\n'}
-          • 10:00 AM — Indian job applications & Overseas research{'\n'}
-          • 02:00 PM — Technical learning, portfolio & interview prep{'\n'}
-          • 05:30 PM — Exercise & workout{'\n'}
-          • 07:00 PM — Family time, LEGO project & leisure{'\n'}
-          • 10:45 PM — Wind down for sleep (Fixed)
-        </Text>
-      </View>
+        return (
+          <View key={cat.id} style={styles.categorySection}>
+            <View style={styles.categoryHeader}>
+              <View style={[styles.categoryPill, { backgroundColor: cat.color + '22', borderColor: cat.color }]}>
+                <Text style={[styles.categoryName, { color: cat.color }]}>{cat.name}</Text>
+              </View>
+              <Text style={[styles.categoryPriority, { color: themeColors.textMuted }]}>
+                Priority: {cat.priority.toUpperCase()}
+              </Text>
+            </View>
+
+            {catTopics.map((topic) => (
+              <TopicCard
+                key={topic.id}
+                topic={topic}
+                categoryColor={cat.color}
+                onPress={() => router.push(`/topic/${topic.id}` as any)}
+              />
+            ))}
+          </View>
+        );
+      })}
+
+      {topics.filter((t) => t.isActive).length === 0 && (
+        <View style={[styles.emptyCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No active topics</Text>
+          <Text style={[styles.emptyBody, { color: themeColors.textSecondary }]}>
+            Go to the Categories tab to add or reactivate topics for your daily dashboard.
+          </Text>
+        </View>
+      )}
+
+      <View style={{ height: 30 }} />
     </ScrollView>
   );
 }
@@ -49,12 +95,17 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   header: {
     marginBottom: 20,
     marginTop: 8,
   },
   dateText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -69,19 +120,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
-  card: {
-    padding: 18,
+  categorySection: {
+    marginBottom: 22,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  categoryPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  categoryName: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  categoryPriority: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  emptyCard: {
+    padding: 24,
     borderRadius: 14,
     borderWidth: 1,
-    marginBottom: 16,
+    alignItems: 'center',
+    marginTop: 20,
   },
-  cardTitle: {
+  emptyTitle: {
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  cardBody: {
+  emptyBody: {
     fontSize: 14,
-    lineHeight: 22,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
