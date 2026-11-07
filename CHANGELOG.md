@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Next Activity Suggestions & Optional Recovery Rescheduling (`feat/topics-tasks-timetable`):**
+  - **Dynamic Next Activity Identification (`getNextPendingBlock`):** When a timetable block is skipped, the app persists the skipped status and instantly identifies the next upcoming pending activity for the day, displaying its title, scheduled start and end times, and a one-click *"Continue with this activity →"* action.
+  - **End-of-Day Handling:** When the final block of the day is skipped or no pending activities remain, cleanly displays an encouraging end-of-day wrap-up banner (*"All scheduled activities for today are complete. Great job wrapping up today's routine!"*).
+  - **Conflict-Free Recovery Slot Finder (`findRecoverySlot`):** Proactively searches later in the day for an available conflict-free time window that accommodates the duration of the skipped activity (aligned to 15-minute intervals). If found, presents *"Accept Reschedule"*, *"Modify Time"*, and *"Dismiss"* options. If no conflict-free window exists, clearly explains that no suitable slot remains today.
+  - **Non-Cascading & Non-Destructive Invariant:** Suggestions are purely advisory. Never moves or alters other blocks; never cascades missed tasks into subsequent time slots; rescheduling only executes upon explicit user approval; dismissing retains the block as skipped with zero timetable alterations.
+  - **Unit Test Suite Expansion:** Added Section 6 in `src/__tests__/timetable.test.ts` with 7 dedicated unit tests covering next pending block identification, conflict-free recovery slot finding, large duration overflow rejection, end-of-day handling, dismissal non-mutation, approved reschedule persistence, and completed/skipped invariant preservation (90 total unit tests passing across 5 suites).
+
 - **Initial Week 1 Timetable Population & Routine Behaviour (`feat/topics-tasks-timetable`):**
   - **Week 1 - Initial Productivity Routine (Monday 9 Nov – Friday 13 Nov 2026):** Populated the user's authentic first-week schedule with 85 timetable blocks (17 contiguous daily blocks from 08:00 wake-up to 22:45 sleep preparation). Built-in essential fixed commitments, high-priority career and technical learning blocks, medium-priority language and review blocks, and flexible breaks/buffer slots.
   - **Weekday-Specific Activity Customisations:**

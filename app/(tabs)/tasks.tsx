@@ -35,6 +35,9 @@ import {
   calculateDuration,
   timeToMinutes,
   findConflictingBlocks,
+  getNextPendingBlock,
+  findRecoverySlot,
+  RecoverySlot,
 } from '../../src/utils/timetableValidators';
 
 export default function TimetableScreen() {
@@ -88,6 +91,13 @@ export default function TimetableScreen() {
 
   // Delete State
   const [blockToDelete, setBlockToDelete] = useState<TimetableBlock | null>(null);
+
+  // Skip Suggestion State
+  const [skipSuggestion, setSkipSuggestion] = useState<{
+    skippedBlock: TimetableBlock;
+    nextPendingBlock: TimetableBlock | null;
+    recoverySlot: RecoverySlot | null;
+  } | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -272,6 +282,54 @@ export default function TimetableScreen() {
     setRescheduleNewDate(b.date);
     setRescheduleNewTime(b.startTime);
     setRescheduleError(null);
+  };
+
+  // Skip Suggestion Handlers
+  const handleSkipBlock = async (b: TimetableBlock) => {
+    // 1. Persist status as skipped
+    await setBlockStatus(b.id, 'skipped');
+
+    // 2. Identify the next chronological upcoming pending block on this date
+    const allBlocks = useTimetableStore.getState().blocks;
+    const nextBlock = getNextPendingBlock(allBlocks, b.date, b.startTime, b.id);
+
+    // 3. Find recovery slot later in the day
+    const endTimeStr = calculateEndTime(b.startTime, b.durationMin);
+    const recovery = findRecoverySlot(allBlocks, b.date, b.durationMin, endTimeStr, b.id);
+
+    // 4. Set suggestion card
+    setSkipSuggestion({
+      skippedBlock: b,
+      nextPendingBlock: nextBlock,
+      recoverySlot: recovery,
+    });
+  };
+
+  const handleAcceptRecovery = async () => {
+    if (!skipSuggestion || !skipSuggestion.recoverySlot) return;
+    const { skippedBlock, recoverySlot } = skipSuggestion;
+    await rescheduleBlock(
+      skippedBlock.id,
+      skippedBlock.date,
+      recoverySlot.startTime,
+      recoverySlot.durationMin
+    );
+    await setBlockStatus(skippedBlock.id, 'pending');
+    setSkipSuggestion(null);
+  };
+
+  const handleModifyRecovery = () => {
+    if (!skipSuggestion) return;
+    const { skippedBlock, recoverySlot } = skipSuggestion;
+    setRescheduleTarget(skippedBlock);
+    setRescheduleNewDate(skippedBlock.date);
+    setRescheduleNewTime(recoverySlot ? recoverySlot.startTime : skippedBlock.startTime);
+    setRescheduleError(null);
+    setSkipSuggestion(null);
+  };
+
+  const handleDismissSuggestion = () => {
+    setSkipSuggestion(null);
   };
 
   const handleSaveBlock = async () => {
@@ -563,6 +621,107 @@ export default function TimetableScreen() {
             </ScrollView>
           </View>
 
+          {/* Next Activity & Recovery Suggestion Card (After Skipping) */}
+          {skipSuggestion && skipSuggestion.skippedBlock.date === selectedDate && (
+            <View style={[styles.suggestionCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+              {/* Card Header */}
+              <View style={styles.suggestionHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, flexWrap: 'wrap' }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                    ⊘ Skipped: "{skipSuggestion.skippedBlock.title}"
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={handleDismissSuggestion} style={styles.suggestionCloseBtn}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.textMuted }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Next Chronological Upcoming Activity */}
+              <View style={[styles.suggestionSection, { backgroundColor: themeColors.surfaceSecondary }]}>
+                {skipSuggestion.nextPendingBlock ? (
+                  <View>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: themeColors.primary, letterSpacing: 0.5, marginBottom: 2 }}>
+                      NEXT UPCOMING ACTIVITY
+                    </Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                      {skipSuggestion.nextPendingBlock.title}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                      Scheduled: {skipSuggestion.nextPendingBlock.startTime} – {calculateEndTime(skipSuggestion.nextPendingBlock.startTime, skipSuggestion.nextPendingBlock.durationMin)} ({skipSuggestion.nextPendingBlock.durationMin}m)
+                    </Text>
+                    <TouchableOpacity
+                      onPress={handleDismissSuggestion}
+                      style={[styles.smallPrimaryBtn, { backgroundColor: themeColors.primary, marginTop: 8 }]}
+                    >
+                      <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700' }}>
+                        Continue with this activity →
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#10B981', letterSpacing: 0.5, marginBottom: 2 }}>
+                      DAY ROUTINE COMPLETE
+                    </Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                      All scheduled activities for today are complete. Great job wrapping up today's routine!
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Recovery Suggestion Section */}
+              <View style={[styles.suggestionSection, { backgroundColor: themeColors.surfaceSecondary, marginTop: 8 }]}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: themeColors.textSecondary, letterSpacing: 0.5, marginBottom: 2 }}>
+                  RECOVERY SUGGESTION FOR SKIPPED ACTIVITY
+                </Text>
+                {skipSuggestion.recoverySlot ? (
+                  <View>
+                    <Text style={{ fontSize: 12, color: themeColors.text, marginBottom: 6 }}>
+                      Available conflict-free slot found later today:{' '}
+                      <Text style={{ fontWeight: '700', color: themeColors.primary }}>
+                        {skipSuggestion.recoverySlot.startTime} – {skipSuggestion.recoverySlot.endTime}
+                      </Text>{' '}
+                      ({skipSuggestion.recoverySlot.durationMin}m)
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                      <TouchableOpacity
+                        onPress={handleAcceptRecovery}
+                        style={[styles.smallPrimaryBtn, { backgroundColor: '#10B981' }]}
+                      >
+                        <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700' }}>
+                          Accept Reschedule
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={handleModifyRecovery}
+                        style={[styles.smallSecondaryBtn, { borderColor: themeColors.border }]}
+                      >
+                        <Text style={{ color: themeColors.text, fontSize: 11, fontWeight: '600' }}>
+                          Modify Time
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={handleDismissSuggestion}
+                        style={[styles.smallSecondaryBtn, { borderColor: themeColors.border }]}
+                      >
+                        <Text style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: '600' }}>
+                          Dismiss
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                      No remaining conflict-free slot of {skipSuggestion.skippedBlock.durationMin}m found later today without conflicting with scheduled activities.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
           {/* Daily Blocks Timeline */}
           <View style={styles.blockList}>
             {filteredDayBlocks.map((b) => {
@@ -693,7 +852,7 @@ export default function TimetableScreen() {
                       )}
                       {blockStatus !== 'skipped' && (
                         <TouchableOpacity
-                          onPress={() => setBlockStatus(b.id, 'skipped')}
+                          onPress={() => handleSkipBlock(b)}
                           style={[styles.statusToggleBtn, { backgroundColor: '#6B728022' }]}
                         >
                           <Text style={{ color: '#6B7280', fontSize: 12, fontWeight: '700' }}>⊘ Skip</Text>
@@ -1871,5 +2030,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
+  },
+  suggestionCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  suggestionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  suggestionCloseBtn: {
+    padding: 4,
+  },
+  suggestionSection: {
+    padding: 10,
+    borderRadius: 8,
+  },
+  smallPrimaryBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  smallSecondaryBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
   },
 });

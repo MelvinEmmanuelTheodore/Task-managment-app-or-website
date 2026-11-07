@@ -14,6 +14,8 @@ import {
   validateDurationMin,
   validateDate,
   validateBlockTiming,
+  getNextPendingBlock,
+  findRecoverySlot,
 } from '../utils/timetableValidators';
 import {
   addDays,
@@ -699,6 +701,186 @@ describe('Timetable Core Functionality Suite', () => {
       expect(legoConflicts.length).toBe(1);
       expect(legoConflicts[0].title).toBe('LEGO McLaren P1');
       expect(legoConflicts[0].priority).toBe('low'); // User can choose to override lower-priority activity
+    });
+  });
+
+  // 6. Next Activity Suggestions & Recovery Slot Calculations
+  describe('6. Next Activity Suggestions & Recovery Slot Calculations', () => {
+    it('identifies the next chronological pending block after skipping', async () => {
+      const timeStore = useTimetableStore.getState();
+      const monBlocks = timeStore.getBlocksForDate('2026-11-09');
+
+      const jobApps = monBlocks.find((b) => b.startTime === '09:00')!;
+      expect(jobApps).toBeDefined();
+
+      // Skip the 09:00 block
+      await timeStore.setBlockStatus(jobApps.id, 'skipped');
+
+      // Next pending block should be the 10:30 Break
+      const nextBlock1 = getNextPendingBlock(
+        useTimetableStore.getState().blocks,
+        '2026-11-09',
+        jobApps.startTime,
+        jobApps.id
+      );
+      expect(nextBlock1).toBeDefined();
+      expect(nextBlock1?.startTime).toBe('10:30');
+      expect(nextBlock1?.title).toBe('Break');
+
+      // If 10:30 Break is already completed, next pending block should be 10:45 Overseas job search
+      await timeStore.setBlockStatus(nextBlock1!.id, 'completed');
+      const nextBlock2 = getNextPendingBlock(
+        useTimetableStore.getState().blocks,
+        '2026-11-09',
+        jobApps.startTime,
+        jobApps.id
+      );
+      expect(nextBlock2).toBeDefined();
+      expect(nextBlock2?.startTime).toBe('10:45');
+      expect(nextBlock2?.title).toBe('Overseas job search and applications');
+    });
+
+    it('finds a conflict-free recovery slot later in the day when available', () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // Suppose a 30-minute block is skipped at 17:00 (Buffer)
+      // Densely scheduled until 22:45, open between 22:45 and 24:00 (75 min free)
+      const slot = findRecoverySlot(
+        allBlocks,
+        '2026-11-09',
+        30,
+        '17:30',
+        'blk_w1_2026-11-09_1700'
+      );
+
+      expect(slot).not.toBeNull();
+      expect(slot?.startTime).toBe('22:45');
+      expect(slot?.endTime).toBe('23:15');
+      expect(slot?.durationMin).toBe(30);
+
+      // Verify slot has 0 conflicts
+      const conflicts = findConflictingBlocks(allBlocks, '2026-11-09', slot!.startTime, slot!.durationMin);
+      expect(conflicts.length).toBe(0);
+    });
+
+    it('clearly returns null when no conflict-free recovery slot fits a large duration', () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // In Week 1 routine, all slots between 10:45 and 22:45 are filled
+      // Only 75 min (22:45 to 24:00) is free
+      // A 90-minute block skipped at 10:45 cannot fit into remaining 75 min
+      const slot = findRecoverySlot(
+        allBlocks,
+        '2026-11-09',
+        90,
+        '12:15',
+        'blk_w1_2026-11-09_1045'
+      );
+
+      expect(slot).toBeNull();
+    });
+
+    it('handles end of day with no remaining activities', () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // Final activity of the day is 22:30 Prepare for tomorrow
+      const lastBlock = allBlocks.find(
+        (b) => b.date === '2026-11-09' && b.startTime === '22:30'
+      )!;
+      expect(lastBlock).toBeDefined();
+
+      const nextBlock = getNextPendingBlock(
+        allBlocks,
+        '2026-11-09',
+        lastBlock.startTime,
+        lastBlock.id
+      );
+
+      // No more upcoming activities on this date
+      expect(nextBlock).toBeNull();
+    });
+
+    it('dismissing a suggestion preserves skipped status without changing any timetable blocks', async () => {
+      const timeStore = useTimetableStore.getState();
+      const monLego = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '20:00')!;
+
+      // Mark skipped
+      await timeStore.setBlockStatus(monLego.id, 'skipped');
+
+      // Dismiss suggestion (no reschedule action executed)
+      const afterDismiss = useTimetableStore.getState().blocks.find((b) => b.id === monLego.id);
+      expect(afterDismiss?.status).toBe('skipped');
+      expect(afterDismiss?.startTime).toBe('20:00');
+      expect(afterDismiss?.durationMin).toBe(60);
+
+      // Verify no other blocks were altered or shifted
+      const otherBlocks = useTimetableStore.getState().getBlocksForDate('2026-11-09').filter((b) => b.id !== monLego.id);
+      expect(otherBlocks.length).toBe(16);
+      for (const b of otherBlocks) {
+        expect(b.status).not.toBe('skipped');
+      }
+    });
+
+    it('accepting a suggestion reschedules the block, resets status to pending, and persists to storage', async () => {
+      const timeStore = useTimetableStore.getState();
+      const monGerman = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '21:00')!;
+      expect(monGerman).toBeDefined();
+
+      // 1. Skip
+      await timeStore.setBlockStatus(monGerman.id, 'skipped');
+
+      // 2. Find recovery slot (30 min fits at 22:45)
+      const slot = findRecoverySlot(
+        useTimetableStore.getState().blocks,
+        '2026-11-09',
+        monGerman.durationMin,
+        '21:30',
+        monGerman.id
+      );
+      expect(slot).not.toBeNull();
+      expect(slot?.startTime).toBe('22:45');
+
+      // 3. User accepts suggestion: reschedule to slot and reset status to pending
+      await timeStore.rescheduleBlock(monGerman.id, '2026-11-09', slot!.startTime, slot!.durationMin);
+      await timeStore.setBlockStatus(monGerman.id, 'pending');
+
+      // Verify store updated
+      const updated = useTimetableStore.getState().blocks.find((b) => b.id === monGerman.id);
+      expect(updated?.startTime).toBe('22:45');
+      expect(updated?.durationMin).toBe(30);
+      expect(updated?.status).toBe('pending');
+
+      // Verify persisted in storage
+      const storageData = await getStorage().loadAll();
+      const persisted = storageData.timetableBlocks.find((b) => b.id === monGerman.id);
+      expect(persisted?.startTime).toBe('22:45');
+      expect(persisted?.status).toBe('pending');
+    });
+
+    it('ensures completed and skipped blocks remain unchanged when suggestions are processed', async () => {
+      const timeStore = useTimetableStore.getState();
+
+      const b1 = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '08:00')!;
+      const b2 = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '09:00')!;
+      const b3 = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '10:30')!;
+
+      // b1 is completed, b2 is skipped
+      await timeStore.setBlockStatus(b1.id, 'completed');
+      await timeStore.setBlockStatus(b2.id, 'skipped');
+
+      // Now skip b3 and identify next / recovery
+      await timeStore.setBlockStatus(b3.id, 'skipped');
+      const next = getNextPendingBlock(useTimetableStore.getState().blocks, '2026-11-09', b3.startTime, b3.id);
+      expect(next?.startTime).toBe('10:45');
+
+      // Assert b1 remains completed, b2 remains skipped, b3 is skipped
+      const currentBlocks = useTimetableStore.getState().blocks;
+      expect(currentBlocks.find((b) => b.id === b1.id)?.status).toBe('completed');
+      expect(currentBlocks.find((b) => b.id === b2.id)?.status).toBe('skipped');
+      expect(currentBlocks.find((b) => b.id === b3.id)?.status).toBe('skipped');
     });
   });
 });

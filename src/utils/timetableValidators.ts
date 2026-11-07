@@ -192,3 +192,79 @@ export function findConflictingBlocks(
     return hasOverlap(startTime, durationMin, b.startTime, b.durationMin);
   });
 }
+
+/** Recovery Slot suggestion structure */
+export interface RecoverySlot {
+  startTime: string;
+  endTime: string;
+  durationMin: number;
+}
+
+/**
+ * Find the next chronological pending block on targetDate starting at or after referenceStartTime.
+ */
+export function getNextPendingBlock(
+  blocks: TimetableBlock[],
+  targetDate: string,
+  referenceStartTime: string,
+  excludeBlockId?: string
+): TimetableBlock | null {
+  const refMins = timeToMinutes(referenceStartTime);
+
+  const candidates = blocks.filter((b) => {
+    if (b.id === excludeBlockId) return false;
+    if (b.date !== targetDate) return false;
+    if (b.status !== 'pending') return false;
+    return timeToMinutes(b.startTime) >= refMins;
+  });
+
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+  return candidates[0];
+}
+
+/**
+ * Find the earliest conflict-free available slot on targetDate for a given duration,
+ * starting from afterTime and ending by maxEndTime (default "24:00").
+ */
+export function findRecoverySlot(
+  blocks: TimetableBlock[],
+  targetDate: string,
+  durationMin: number,
+  afterTime: string,
+  excludeBlockId?: string,
+  maxEndTime: string = '24:00'
+): RecoverySlot | null {
+  if (!validateDurationMin(durationMin)) return null;
+
+  const afterMins = timeToMinutes(afterTime);
+  const maxEndMins = timeToMinutes(maxEndTime);
+
+  // Align start search to the next 15-minute boundary
+  let candidateStartMins = Math.ceil(afterMins / 15) * 15;
+
+  while (candidateStartMins + durationMin <= maxEndMins) {
+    const candidateStart = minutesToTime(candidateStartMins);
+    const conflicts = findConflictingBlocks(
+      blocks,
+      targetDate,
+      candidateStart,
+      durationMin,
+      excludeBlockId
+    );
+
+    if (conflicts.length === 0) {
+      return {
+        startTime: candidateStart,
+        endTime: minutesToTime(candidateStartMins + durationMin),
+        durationMin,
+      };
+    }
+
+    candidateStartMins += 15;
+  }
+
+  return null;
+}
+

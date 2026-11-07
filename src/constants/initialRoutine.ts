@@ -432,3 +432,4 @@ export function getInitialWeek1Blocks(): TimetableBlock[] {
 
   return blocks;
 }
+
