@@ -81,6 +81,33 @@ describe('Milestone A Audit Verification Suite', () => {
         expect(allCategories.find((c) => c.id === `cat_concurrent_${i}`)).toBeDefined();
       }
     });
+
+    it('should safely serialize multi-record operations (reorder, cascade, and task adds) concurrently', async () => {
+      const catStore = useCategoryTopicStore.getState();
+      const initialCatIds = catStore.categories.map((c) => c.id);
+      const reversedCatIds = [...initialCatIds].reverse();
+
+      // Launch concurrent operations: reorder categories, create a new task, create a new category
+      await Promise.all([
+        catStore.reorderCategories(reversedCatIds),
+        catStore.addTask('top_career_1', 'Concurrent Task 1'),
+        catStore.addTask('top_career_1', 'Concurrent Task 2'),
+        catStore.addCategory('Concurrent New Cat', 'high', '#059669'),
+      ]);
+
+      const storageData = await adapter.loadAll();
+
+      // 1. Verify category reorder was saved
+      const careerCat = storageData.categories.find((c) => c.id === initialCatIds[0]);
+      expect(careerCat?.sortOrder).toBe(initialCatIds.length);
+
+      // 2. Verify both concurrent tasks were saved without loss
+      expect(storageData.topicTasks.some((t) => t.title === 'Concurrent Task 1')).toBe(true);
+      expect(storageData.topicTasks.some((t) => t.title === 'Concurrent Task 2')).toBe(true);
+
+      // 3. Verify the new category was saved without loss
+      expect(storageData.categories.some((c) => c.name === 'Concurrent New Cat')).toBe(true);
+    });
   });
 
   // 3. Theme Persistence
@@ -288,10 +315,26 @@ describe('Milestone A Audit Verification Suite', () => {
       expect(validateDurationMin(NaN)).toBe(false);
     });
 
-    it('should validate target date in YYYY-MM-DD format', () => {
+    it('should validate actual calendar dates and reject impossible dates and invalid leap years', () => {
+      // Valid non-leap February
+      expect(validateDate('2026-02-28')).toBe(true);
+
+      // Invalid non-leap year Feb 29
+      expect(validateDate('2026-02-29')).toBe(false);
+
+      // Impossible calendar dates
+      expect(validateDate('2026-02-31')).toBe(false);
+      expect(validateDate('2026-04-31')).toBe(false);
+
+      // Valid leap-year dates
+      expect(validateDate('2024-02-29')).toBe(true);
+      expect(validateDate('2028-02-29')).toBe(true);
+
+      // General valid dates
       expect(validateDate('2026-11-08')).toBe(true);
       expect(validateDate('2026-01-01')).toBe(true);
 
+      // Malformed / out of range
       expect(validateDate('2026-13-01')).toBe(false);
       expect(validateDate('2026-05-35')).toBe(false);
       expect(validateDate('invalid-date')).toBe(false);

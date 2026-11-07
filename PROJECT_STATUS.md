@@ -19,7 +19,7 @@
   - [x] Dashboard with active topics grouped by category priority with pure presentational cards
   - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
-  - [x] Unit test suite (19 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
+  - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build *(Postponed to Milestone B)*
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B)*
 - [ ] Step 4: Data Layer & Offline Sync

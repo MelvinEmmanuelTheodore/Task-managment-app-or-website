@@ -105,9 +105,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       return newOrder >= 0 ? { ...c, sortOrder: newOrder + 1, updatedAt: now } : c;
     });
     set({ categories: updated });
-    const envelope = await storageAdapter.loadAll();
-    envelope.categories = updated;
-    await storageAdapter.saveAll(envelope);
+    await storageAdapter.reorderCategories(orderedIds);
   },
 
   moveCategoryOrder: async (categoryId, direction) => {
@@ -144,13 +142,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       blocks: s.blocks.filter((b) => b.categoryId !== categoryId),
     }));
 
-    const envelope = await storageAdapter.loadAll();
-    envelope.categories = updatedCategories;
-    envelope.topics = updatedTopics;
-    envelope.topicTasks = updatedTasks;
-    // Also remove timetable blocks tied to this category
-    envelope.timetableBlocks = envelope.timetableBlocks.filter((b: TimetableBlock) => b.categoryId !== categoryId);
-    await storageAdapter.saveAll(envelope);
+    await storageAdapter.deleteCategoryCascade(categoryId);
   },
 
   moveCategoryContentsAndDelete: async (fromCategoryId, toCategoryId) => {
@@ -172,14 +164,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       ),
     }));
 
-    const envelope = await storageAdapter.loadAll();
-    envelope.categories = updatedCategories;
-    envelope.topics = updatedTopics;
-    // Also reassign timetable blocks
-    envelope.timetableBlocks = envelope.timetableBlocks.map((b: TimetableBlock) =>
-      b.categoryId === fromCategoryId ? { ...b, categoryId: toCategoryId, updatedAt: now } : b
-    );
-    await storageAdapter.saveAll(envelope);
+    await storageAdapter.moveCategoryContentsAndDelete(fromCategoryId, toCategoryId);
   },
 
   addTopic: async (categoryId, name, priority = 'medium') => {
@@ -228,9 +213,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       return order >= 0 ? { ...t, sortOrder: order + 1, updatedAt: now } : t;
     });
     set({ topics: updated });
-    const envelope = await storageAdapter.loadAll();
-    envelope.topics = updated;
-    await storageAdapter.saveAll(envelope);
+    await storageAdapter.reorderTopics(categoryId, orderedIds);
   },
 
   moveTopicOrder: async (topicId, direction) => {

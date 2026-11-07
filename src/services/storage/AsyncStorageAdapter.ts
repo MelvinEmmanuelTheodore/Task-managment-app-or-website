@@ -46,7 +46,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   /** Transactional mutation: queues read-modify-write sequentially to prevent lost updates */
-  private async mutateEnvelope(
+  async mutateEnvelope(
     mutator: (envelope: StoredDataEnvelope) => void | Promise<void>
   ): Promise<StoredDataEnvelope> {
     return this.enqueueWrite(async () => {
@@ -210,6 +210,52 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     }
     await this.saveAll(parsed);
     return parsed;
+  }
+
+  async reorderCategories(orderedIds: string[]): Promise<void> {
+    const now = dateToAppTimestamp(new Date());
+    await this.mutateEnvelope((data) => {
+      data.categories = data.categories.map((c) => {
+        const newOrder = orderedIds.indexOf(c.id);
+        return newOrder >= 0 ? { ...c, sortOrder: newOrder + 1, updatedAt: now } : c;
+      });
+    });
+  }
+
+  async reorderTopics(categoryId: string, orderedIds: string[]): Promise<void> {
+    const now = dateToAppTimestamp(new Date());
+    await this.mutateEnvelope((data) => {
+      data.topics = data.topics.map((t) => {
+        if (t.categoryId !== categoryId) return t;
+        const newOrder = orderedIds.indexOf(t.id);
+        return newOrder >= 0 ? { ...t, sortOrder: newOrder + 1, updatedAt: now } : t;
+      });
+    });
+  }
+
+  async deleteCategoryCascade(categoryId: string): Promise<void> {
+    await this.mutateEnvelope((data) => {
+      const topicIdsToDelete = new Set(
+        data.topics.filter((t) => t.categoryId === categoryId).map((t) => t.id)
+      );
+      data.categories = data.categories.filter((c) => c.id !== categoryId);
+      data.topics = data.topics.filter((t) => t.categoryId !== categoryId);
+      data.topicTasks = data.topicTasks.filter((task) => !topicIdsToDelete.has(task.topicId));
+      data.timetableBlocks = data.timetableBlocks.filter((b) => b.categoryId !== categoryId);
+    });
+  }
+
+  async moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<void> {
+    const now = dateToAppTimestamp(new Date());
+    await this.mutateEnvelope((data) => {
+      data.topics = data.topics.map((t) =>
+        t.categoryId === fromCategoryId ? { ...t, categoryId: toCategoryId, updatedAt: now } : t
+      );
+      data.timetableBlocks = data.timetableBlocks.map((b) =>
+        b.categoryId === fromCategoryId ? { ...b, categoryId: toCategoryId, updatedAt: now } : b
+      );
+      data.categories = data.categories.filter((c) => c.id !== fromCategoryId);
+    });
   }
 }
 

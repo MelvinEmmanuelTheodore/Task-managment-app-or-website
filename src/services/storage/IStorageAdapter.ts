@@ -37,4 +37,11 @@ export interface IStorageAdapter {
   // Export / Import
   exportAllData(): Promise<string>;
   importAllData(jsonString: string): Promise<StoredDataEnvelope>;
+
+  // Atomic Multi-Record Mutations (Transactional Queue)
+  mutateEnvelope(mutator: (envelope: StoredDataEnvelope) => void | Promise<void>): Promise<StoredDataEnvelope>;
+  reorderCategories(orderedIds: string[]): Promise<void>;
+  reorderTopics(categoryId: string, orderedIds: string[]): Promise<void>;
+  deleteCategoryCascade(categoryId: string): Promise<void>;
+  moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<void>;
 }
