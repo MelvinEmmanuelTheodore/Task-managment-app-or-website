@@ -39,8 +39,8 @@ export function validateBackupPayload(raw: unknown): ValidationResult {
   // 1. Schema Version
   if (typeof payload.schemaVersion !== 'number') {
     errors.push('Missing or invalid "schemaVersion" field (expected number)');
-  } else if (![1, 2].includes(payload.schemaVersion)) {
-    errors.push(`Unsupported schema version ${payload.schemaVersion} (expected 1 or 2)`);
+  } else if (payload.schemaVersion !== 2) {
+    errors.push(`Unsupported schema version ${payload.schemaVersion} (expected 2)`);
   }
 
   // 2. Categories
@@ -259,7 +259,7 @@ export function mergeBackupEnvelopes(
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     categories: mergedCategories,
     topics: mergedTopics,
     topicTasks: mergedTopicTasks,

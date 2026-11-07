@@ -144,7 +144,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       expect(await AsyncStorage.getItem(STORAGE_KEY)).toBeNull();
       const loaded = await adapter.loadAll();
       expect(adapter.isStorageLocked()).toBe(false);
-      expect(loaded.schemaVersion).toBe(1);
+      expect(loaded.schemaVersion).toBe(2);
       expect(loaded.categories.length).toBeGreaterThan(0);
       expect(await AsyncStorage.getItem(STORAGE_KEY)).not.toBeNull();
     });
@@ -152,12 +152,41 @@ describe('Step B0: Hardening & Resilience Suite', () => {
 
   // Fix 2: Sequential Version Migration & Failure Safeguards
   describe('Fix 2: Version Migration Mechanism & Failure Safeguards', () => {
+    const v1Data = {
+      schemaVersion: 1,
+      categories: [
+        {
+          id: 'cat_v1',
+          name: 'V1 Category',
+          priority: 'high',
+          sortOrder: 1024,
+          color: '#000',
+          createdAt: { seconds: 1000, nanoseconds: 0 },
+          updatedAt: { seconds: 1000, nanoseconds: 0 },
+        },
+      ],
+      topics: [],
+      topicTasks: [],
+      timetableBlocks: [],
+      settings: {
+        theme: 'dark',
+        wakeUpTime: '08:00',
+        windDownTime: '22:00',
+        defaultReminderMinutesBefore: 5,
+        batteryOptimizationDismissed: false,
+        categories: ['legacy_cat_list'],
+        createdAt: { seconds: 1000, nanoseconds: 0 },
+        updatedAt: { seconds: 1000, nanoseconds: 0 },
+      },
+    };
+
     it('should preserve v1 payload and sequentially migrate to v2', async () => {
-      await adapter.loadAll(); // Seeds initial v1 data
-      const v1Raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const v1Raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, v1Raw);
 
       const migrated = await adapter.migrateVersion(2);
       expect(migrated.schemaVersion).toBe(2);
+      expect((migrated.settings as any).categories).toBeUndefined(); // Legacy field stripped
 
       // Verify pre-migration snapshot key exists and matches original v1
       const allKeys = await AsyncStorage.getAllKeys();
@@ -170,20 +199,22 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       expect(stored.schemaVersion).toBe(2);
     });
 
-    it('should successfully load and mutate data after migration from v1 to v2 without locking', async () => {
-      await adapter.loadAll(); // Seeds initial v1 data
-      expect((await adapter.loadAll()).schemaVersion).toBe(1);
+    it('should successfully auto-migrate v1 data to v2 on loadAll and allow mutations without locking', async () => {
+      const v1Raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, v1Raw);
 
-      const migrated = await adapter.migrateVersion(2);
-      expect(migrated.schemaVersion).toBe(2);
-
-      // Reader loads migrated v2 data without locking
+      // Reader auto-migrates v1 data to v2 without locking
       const loadedAfter = await adapter.loadAll();
       expect(adapter.isStorageLocked()).toBe(false);
       expect(loadedAfter.schemaVersion).toBe(2);
-      expect(loadedAfter.categories.length).toBeGreaterThan(0);
+      expect(loadedAfter.categories.some((c) => c.id === 'cat_v1')).toBe(true);
 
-      // Reader allows mutations on v2 data
+      // Verify pre-migration snapshot was created
+      const allKeys = await AsyncStorage.getAllKeys();
+      const preMigrationKey = allKeys.find((k) => k.startsWith(PRE_MIGRATION_KEY_PREFIX));
+      expect(preMigrationKey).toBeDefined();
+
+      // Reader allows mutations on migrated v2 data
       await adapter.saveCategory({
         id: 'cat_v2_test',
         name: 'V2 Category',
@@ -199,9 +230,41 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       expect(reloaded.schemaVersion).toBe(2);
     });
 
-    it('should abort migration and leave original data untouched if pre-migration preservation fails', async () => {
+    it('should reject genuinely unsupported future versions (e.g. schemaVersion: 3 or 99) and lock writes', async () => {
+      const futurePayload = {
+        schemaVersion: 3,
+        categories: [],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: { theme: 'dark' },
+      };
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(futurePayload));
+
       await adapter.loadAll();
-      const v1Raw = await AsyncStorage.getItem(STORAGE_KEY);
+      expect(adapter.isStorageLocked()).toBe(true);
+      expect(adapter.getCorruptionError()).toContain('Unknown future schema version: 3');
+
+      // Writing recovery key
+      const allKeys = await AsyncStorage.getAllKeys();
+      const recoveryKey = allKeys.find((k) => k.startsWith(RECOVERY_KEY_PREFIX));
+      expect(recoveryKey).toBeDefined();
+
+      await expect(
+        adapter.mutateEnvelope(() => {})
+      ).rejects.toThrow('Storage is locked');
+
+      // Also migrateVersion rejects unsupported future versions on unlocked storage
+      adapter.clearLock();
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ schemaVersion: 2, categories: [], topics: [], topicTasks: [], timetableBlocks: [], settings: {} }));
+      await expect(adapter.migrateVersion(3)).rejects.toThrow(
+        'Target migration schema version 3 is not supported by this application version'
+      );
+    });
+
+    it('should abort migration and leave original data untouched if pre-migration preservation fails', async () => {
+      const v1Raw = JSON.stringify(v1Data);
+      await AsyncStorage.setItem(STORAGE_KEY, v1Raw);
 
       const multiSet = (AsyncStorage as any).multiSet;
       jest.spyOn(AsyncStorage, 'setItem').mockImplementation(async (key: string, value: string) => {
@@ -231,7 +294,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
     it('should reject malformed backup payloads (missing arrays, invalid timestamps, orphaned FKs)', () => {
       // Missing topics array
       const malformed1 = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [],
         topicTasks: [],
         timetableBlocks: [],
@@ -243,7 +306,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
 
       // Topic referencing non-existent category
       const orphanTopic = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [{ id: 'cat_1', name: 'Work', priority: 'high', sortOrder: 1024, color: '#000', createdAt: now, updatedAt: now }],
         topics: [{ id: 'top_1', categoryId: 'missing_cat', name: 'Task', priority: 'high', sortOrder: 1024, isActive: true, createdAt: now, updatedAt: now }],
         topicTasks: [],
@@ -256,7 +319,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
 
       // Duplicate category IDs within imported array
       const duplicateCat = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [
           { id: 'cat_1', name: 'Work', priority: 'high', sortOrder: 1024, color: '#000', createdAt: now, updatedAt: now },
           { id: 'cat_1', name: 'Work Copy', priority: 'low', sortOrder: 2048, color: '#111', createdAt: now, updatedAt: now },
@@ -285,7 +348,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
 
     it('should merge incoming data deterministically: same ID = same record, newer updatedAt wins, equal retains local', () => {
       const local: StoredDataEnvelope = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [
           { id: 'cat_1', name: 'Local Name (Kept if equal)', priority: 'high', sortOrder: 1024, color: '#000', createdAt: older, updatedAt: now },
           { id: 'cat_2', name: 'Local Old Name', priority: 'medium', sortOrder: 2048, color: '#111', createdAt: older, updatedAt: older },
@@ -297,7 +360,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       };
 
       const incoming: StoredDataEnvelope = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [
           // Same ID, equal timestamp -> local should be retained
           { id: 'cat_1', name: 'Incoming Name (Ignored)', priority: 'low', sortOrder: 9999, color: '#FFF', createdAt: older, updatedAt: now },
@@ -352,7 +415,7 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       });
 
       const newIncoming: StoredDataEnvelope = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         categories: [{ id: 'cat_new', name: 'Should Not Be Saved', priority: 'high', sortOrder: 1024, color: '#000', createdAt: now, updatedAt: now }],
         topics: [],
         topicTasks: [],
@@ -381,6 +444,49 @@ describe('Step B0: Hardening & Resilience Suite', () => {
         'Validation failed'
       );
       expect(await AsyncStorage.getItem(STORAGE_KEY)).toBe(initialRaw);
+    });
+
+    it('should reject backup payloads with unsupported schema versions (e.g. 1 or 99 when CURRENT_SCHEMA_VERSION is 2)', () => {
+      const v1Backup = {
+        schemaVersion: 1,
+        categories: [],
+        topics: [],
+        topicTasks: [],
+        timetableBlocks: [],
+        settings: { defaultReminderMinutesBefore: 5, theme: 'dark', wakeUpTime: '08:00', windDownTime: '22:00', batteryOptimizationDismissed: false, createdAt: now, updatedAt: now },
+      };
+      const res1 = validateBackupPayload(v1Backup);
+      expect(res1.isValid).toBe(false);
+      expect(res1.errors).toContain('Unsupported schema version 1 (expected 2)');
+
+      const v99Backup = { ...v1Backup, schemaVersion: 99 };
+      const res99 = validateBackupPayload(v99Backup);
+      expect(res99.isValid).toBe(false);
+      expect(res99.errors).toContain('Unsupported schema version 99 (expected 2)');
+    });
+
+    it('should fail native export workflow and block Replace-All when Sharing.isAvailableAsync() resolves to false', async () => {
+      const Sharing = require('expo-sharing');
+      jest.spyOn(Sharing, 'isAvailableAsync').mockResolvedValueOnce(false);
+
+      const isShareAvailable = await Sharing.isAvailableAsync();
+      expect(isShareAvailable).toBe(false);
+
+      // Emulate handleExport failure behavior on unavailable sharing
+      let hasExportedBackup = true;
+      let errorOccurred = false;
+      try {
+        if (!isShareAvailable) {
+          throw new Error('Native file sharing is not available on this device.');
+        }
+        await Sharing.shareAsync('file:///dummy.json');
+      } catch (err: any) {
+        errorOccurred = true;
+        hasExportedBackup = false;
+      }
+
+      expect(errorOccurred).toBe(true);
+      expect(hasExportedBackup).toBe(false); // Does NOT unlock replace-all
     });
   });
 

@@ -92,13 +92,14 @@ export default function SettingsScreen() {
         JSON.parse(verifyContent);
 
         const isShareAvailable = await Sharing.isAvailableAsync();
-        if (isShareAvailable) {
-          await Sharing.shareAsync(cacheFile.uri, {
-            mimeType: 'application/json',
-            dialogTitle: 'Export Time Management App Backup',
-            UTI: 'public.json',
-          });
+        if (!isShareAvailable) {
+          throw new Error('Native file sharing is not available on this device.');
         }
+        await Sharing.shareAsync(cacheFile.uri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Export Time Management App Backup',
+          UTI: 'public.json',
+        });
       }
 
       showStatusNotice('Backup file ready: choose where to save it.');
@@ -107,6 +108,8 @@ export default function SettingsScreen() {
       return true;
     } catch (err: any) {
       setIsExporting(false);
+      setHasExportedBackup(false);
+      setHasAcknowledgedExternalBackup(false);
       const msg = err?.message || 'Could not export local database.';
       Alert.alert('Backup Export Failed', msg);
       setErrorMessage(msg);

@@ -14,8 +14,7 @@ export const STORAGE_KEY = '@time_mgmt_app_data_v1';
 export const RECOVERY_KEY_PREFIX = '@time_mgmt_app_data_recovery_';
 export const PRE_MIGRATION_KEY_PREFIX = '@time_mgmt_pre_migration_v1_';
 export const SNAPSHOT_KEY_PREFIX = '@time_mgmt_internal_rollback_snapshot_';
-export const CURRENT_SCHEMA_VERSION = 1;
-export const SUPPORTED_SCHEMA_VERSIONS = new Set<number>([1, 2]);
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export type MigrationStep = (data: any) => any;
 
@@ -23,11 +22,16 @@ export type MigrationStep = (data: any) => any;
  * Sequential migration functions registry: v1 -> v2, v2 -> v3, etc.
  */
 export const MIGRATIONS: Record<number, MigrationStep> = {
-  1: (v1Data: StoredDataEnvelope) => {
-    return {
+  1: (v1Data: any) => {
+    const migrated = {
       ...v1Data,
       schemaVersion: 2,
     };
+    if (migrated.settings && 'categories' in migrated.settings) {
+      const { categories, ...restSettings } = migrated.settings;
+      migrated.settings = restSettings;
+    }
+    return migrated;
   },
 };
 
@@ -194,8 +198,40 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing schemaVersion');
     }
 
-    if (!SUPPORTED_SCHEMA_VERSIONS.has(parsed.schemaVersion)) {
+    if (parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
       return this.handleCorruptedPayload(raw, `Unknown future schema version: ${parsed.schemaVersion}`);
+    }
+
+    if (parsed.schemaVersion < CURRENT_SCHEMA_VERSION) {
+      // Step 1: Pre-migration preservation
+      const preMigrationKey = `${PRE_MIGRATION_KEY_PREFIX}${Date.now()}`;
+      try {
+        await AsyncStorage.setItem(preMigrationKey, raw);
+        const verified = await AsyncStorage.getItem(preMigrationKey);
+        if (!verified || verified !== raw) {
+          throw new Error('Pre-migration preservation verification failed: content mismatch');
+        }
+      } catch (preserveErr: any) {
+        return this.handleCorruptedPayload(
+          raw,
+          `Migration aborted: pre-migration backup failed (${preserveErr?.message})`
+        );
+      }
+
+      // Step 2: Sequential migrations
+      let currentData = parsed;
+      for (let v = parsed.schemaVersion; v < CURRENT_SCHEMA_VERSION; v++) {
+        const migrator = MIGRATIONS[v];
+        if (!migrator) {
+          return this.handleCorruptedPayload(raw, `Missing migration step from version ${v} to ${v + 1}`);
+        }
+        currentData = migrator(currentData);
+        currentData.schemaVersion = v + 1;
+      }
+
+      // Step 3: Write migrated data
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
+      parsed = currentData;
     }
 
     // Verify required core entity collections exist
@@ -455,7 +491,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         throw new Error('Cannot run migration: missing schemaVersion');
       }
 
-      if (!SUPPORTED_SCHEMA_VERSIONS.has(targetVersion)) {
+      if (targetVersion > CURRENT_SCHEMA_VERSION || !MIGRATIONS[targetVersion - 1]) {
         throw new Error(`Target migration schema version ${targetVersion} is not supported by this application version`);
       }
 

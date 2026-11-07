@@ -16,7 +16,7 @@ describe('AsyncStorageAdapter Unit Tests', () => {
 
   it('should initialize default categories and topics on first load', async () => {
     const data = await adapter.loadAll();
-    expect(data.schemaVersion).toBe(1);
+    expect(data.schemaVersion).toBe(2);
     expect(data.categories.length).toBe(6);
     expect(data.topics.length).toBeGreaterThan(15);
     expect(data.categories[0].name).toBe('Career');
@@ -104,7 +104,7 @@ describe('AsyncStorageAdapter Unit Tests', () => {
     const exportedJson = await adapter.exportAllData();
     expect(typeof exportedJson).toBe('string');
     const parsed = JSON.parse(exportedJson);
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
 
     // Clean and import
     await AsyncStorage.clear();
