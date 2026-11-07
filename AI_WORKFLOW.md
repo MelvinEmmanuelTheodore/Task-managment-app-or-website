@@ -23,8 +23,9 @@ To ensure clear ownership, avoid conflicting edits, and guarantee technical exce
 
 ## 3. How Other AIs Access This Project
 When collaborating with Claude or ChatGPT in web or desktop chats:
-1. **GitHub Repository:** Direct them to examine the public GitHub repository:  
-   `https://github.com/MelvinEmmanuelTheodore/Task-managment-app-or-website`
+1. **Private GitHub Repository:** The repository is **Private**:  
+   `https://github.com/MelvinEmmanuelTheodore/Task-managment-app-or-website`  
+   Because the repository is private, external AI web search tools cannot fetch it anonymously. The user can copy and paste documentation files or code snippets into chat sessions as needed, or connect GitHub account integration where supported.
 2. **Key Shared Files:** The following files serve as the ground truth of project state:
    - [PROJECT_BRIEF.md](PROJECT_BRIEF.md) — Scope and guiding principles.
    - [ARCHITECTURE.md](ARCHITECTURE.md) — Technical design, data model, and sync protocols.
@@ -39,4 +40,4 @@ When collaborating with Claude or ChatGPT in web or desktop chats:
 ## 4. Git & Repository Management Rules
 - **Branch Strategy:** Work primarily on `main` for standard Phase 1 progression. Feature branches (e.g., `feat/offline-sync`) should be created for experimental or major refactors.
 - **Commit Granularity:** Commit at each completed step with descriptive, standard commit messages (e.g., `docs: establish multi-ai shared documentation suite`).
-- **Secret Protection:** Never commit `.env`, `google-services.json` (with production secrets), or private API keys. Use `.gitignore` and `.env.example` to prevent accidental credential leakage.
+- **Secret Protection:** Never commit `.env*` files (except `.env.example`), `google-services.json` (with production secrets), or private API keys. Use `.gitignore` and `.env.example` to prevent accidental credential leakage.

@@ -17,11 +17,15 @@ web-build/
 android/
 ios/
 
+# Firebase local emulators & CLI cache
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
 # Environment files & secrets (Strict)
-.env
-.env*.local
-*.env
-*.local
+.env*
+!.env.example
 credentials.json
 google-services.json
 GoogleService-Info.plist

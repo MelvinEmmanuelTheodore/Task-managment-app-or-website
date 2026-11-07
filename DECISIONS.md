@@ -39,11 +39,11 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ---
 
-## Decision 003 — Dual Firebase SDK Strategy
+## Decision 003 — Dual Firebase SDK Strategy & Decoupled Domain Types
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
-**Decision:** Use `@react-native-firebase/firestore` (native Android SDK) on Android and `firebase/firestore` (JS modular SDK) on web, united under a shared service interface (`firestore.ts`).
+**Decision:** Use `@react-native-firebase/firestore` (native Android SDK) on Android and `firebase/firestore` (JS modular SDK) on web, united under a shared service interface (`firestore.ts`) and a decoupled `AppTimestamp` domain type.
 
 **Offline Persistence Clarifications:**
 - **Android:** Native SDK manages an on-disk SQLite/LevelDB cache. Pending writes survive standard process termination.
@@ -61,8 +61,9 @@ This document records architectural choices, evaluation of alternatives, and imp
 **Sync Mechanism:**
 1. Background Firestore listeners do not run when the Android app is terminated.
 2. Every time the app comes to foreground (`AppState === 'active'`), it performs a self-healing resync, reconciling server tasks with scheduled notification IDs.
-3. Wake-up (`08:00`) and Wind-down (`22:45`) are registered as **repeating daily alarms** as a safety net if the user doesn't open the app for days.
-4. The web dashboard displays a warning banner when editing a task due within 2 hours.
+3. **Permission Revocation Check:** Android deletes all scheduled exact alarms if `SCHEDULE_EXACT_ALARM` is revoked in system settings. The foreground resync verifies permission status on every launch and reschedules accordingly.
+4. Wake-up (`08:00`) and Wind-down (`22:45`) are registered as **repeating daily alarms** as a safety net if the user doesn't open the app for days.
+5. The web dashboard displays a warning banner when editing a task due within 2 hours.
 
 ---
 
@@ -73,25 +74,27 @@ This document records architectural choices, evaluation of alternatives, and imp
 **Decision:** Utilize `delivery: 'alarmClock'` on Android `IMPORTANCE_HIGH` channels for time-critical alarms.
 
 **Verification Status:** **UNVERIFIED on target physical hardware.**
-- Documentation: Introduced in `expo-notifications` (Expo SDK 58, PR `#49687`).
+- Documentation: Introduced in `expo-notifications` (Expo SDK 58, PR `#49687`: [Expo Notifications Changelog](https://github.com/expo/expo/blob/main/packages/expo-notifications/CHANGELOG.md)).
+- Softened Claim: While `setAlarmClock` is designed to bypass standard battery optimizations, OEM skins (MIUI/HyperOS, ColorOS) can still enforce aggressive restrictions. Reliability will be tested experimentally in **Step 3.5**.
 - Fallback: If `expo-notifications` fails physical device wake tests (in Step 3.5), we will evaluate **Notifee** as the native alarm engine.
 - Exact vs Best-Effort:
-  - Exact (`alarmClock`): Bypasses Doze mode for `isFixed == true` tasks and daily wake-up/sleep alarms.
+  - Exact (`alarmClock`): Reserved for `isFixed == true` tasks and daily wake-up/sleep alarms.
   - Best-Effort (`bestEffort`): Standard fallback if user rejects `SCHEDULE_EXACT_ALARM` permissions on Android 14+.
 
 ---
 
-## Decision 006 — Routine Generation & Deterministic IDs
+## Decision 006 — Routine Generation: Deterministic IDs & Create-If-Not-Exists
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
 **Decision:** Routine templates generate independent task instances for a 7-day rolling window using deterministic IDs:
-`${sourceTemplateId}_${date}_${blockIndex}` (e.g. `default_weekday_2026-11-08_0`).
+`${sourceTemplateId}_${date}_${blockId}` (using a stable string `blockId` rather than index).
 
-**Benefits:**
-- Multi-device generation (e.g. opening web and mobile simultaneously) writes to identical document paths without generating duplicate tasks.
-- Modifying a template never modifies past or completed tasks.
-- Editing future generated tasks requires explicit user confirmation.
+**Idempotent Generation Rules:**
+- Generation uses Firestore transactions with a strict **create-if-not-exists** check (`transaction.get()` then create only if missing).
+- Existing tasks (whether pending, in progress, completed, or custom-edited) are **never overwritten**.
+- Multi-device generation (e.g. opening web and mobile simultaneously) writes to identical document paths without generating duplicates or clobbering edits.
+- Modifying a template never modifies past or completed tasks. Future task modifications require explicit user confirmation.
 
 ---
 
@@ -103,7 +106,8 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 **Reopening Tasks:**
 - Tasks marked `done` by mistake can be reopened back to `in_progress`.
-- The deliberate reopen action preserves `actualStart` and `actualEnd` for time-tracking integrity.
+- On reopen, the previous execution record (`actualStart`, `actualEnd`, `completedAt`) is archived into an `actualHistory` array.
+- Current `actualStart` and `actualEnd` are reset to `null` so the user can record a fresh Start/Finish sequence.
 
 ---
 
@@ -111,15 +115,15 @@ This document records architectural choices, evaluation of alternatives, and imp
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
-**Decision:** All timestamps stored in UTC `Timestamp`. Displayed and queried in IST (`Asia/Kolkata`, UTC+5:30). Date strings (`"YYYY-MM-DD"`) represent the IST calendar day.
+**Decision:** All timestamps stored in UTC. Displayed and queried in IST (`Asia/Kolkata`, UTC+5:30). Date strings (`"YYYY-MM-DD"`) represent the IST calendar day.
 
 ---
 
-## Decision 009 — Write-Once Actual Execution Times
+## Decision 009 — Write-Once Actual Execution Times & Execution History
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
-**Decision:** `actualStart` and `actualEnd` are immutable once recorded, ensuring objective planned vs actual analysis.
+**Decision:** `actualStart` and `actualEnd` are immutable once set during an active session. They cannot be overwritten during planned schedule edits. Reopening a task archives them to `actualHistory` rather than erasing past data.
 
 ---
 
@@ -127,16 +131,17 @@ This document records architectural choices, evaluation of alternatives, and imp
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
-**Decision:** Validate task properties both on the client before write and on the server via Firestore Security Rules (title length 1-200, valid priority/status enum, duration 5-480 min, `plannedEnd > plannedStart`).
+**Decision:** Validate task properties both on the client before write and on the server via Firestore Security Rules:
+- Server checks: key whitelist (`keys().hasOnly()`), title length 1-200, valid priority/status enum, duration 5-480 min, `plannedEnd > plannedStart`, status transition state machine, and actual times protection.
 
 ---
 
-## Decision 011 — Backup & Recovery Protocol
+## Decision 011 — Backup & Recovery Protocol with Verified Pre-Backup
 **Date:** 2026-11-07  
 **Status:** Proposed — Awaiting User Approval  
 
 **Decision:** Settings screen provides manual JSON Export and Import.
-- **Safety Auto-Backup:** Triggering "Replace All" on import automatically creates and downloads a fresh safety backup of the existing state before replacement.
+- **Mandatory Pre-Backup:** Triggering "Replace All" on import will **abort immediately** if it fails to verify that a complete safety backup of the existing state was successfully generated and saved to device storage (verified via file size / download blob confirmation).
 - **Rescheduling:** Alarms are flushed and rescheduled for the new 7-day window following import.
 
 ---
@@ -162,4 +167,4 @@ This document records architectural choices, evaluation of alternatives, and imp
 **Decision:**
 - **Phases 1–4:** Run strictly on the **Firebase Spark (Free) plan** and **Expo EAS Free Tier** (15 Android builds/month; unlimited local builds). No credit card required.
 - **Billing Alerts:** Set up a $0 or $5 budget alert on Google Cloud Console before entering any paid tier.
-- **Phase 5 AI Assistant Route:** **UNDECIDED**. While Cloud Functions + Claude API is one path, alternatives (such as local on-device inference, Gemini free tier, or client-side BYOK with local storage) will be evaluated in Phase 5 without presuming the Blaze plan.
+- **Phase 5 AI Assistant Route:** **UNDECIDED**. The architecture route will be chosen in Phase 5. API keys must never appear in frontend code (serverless proxy or managed backend only).

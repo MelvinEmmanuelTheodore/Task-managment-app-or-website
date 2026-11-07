@@ -59,33 +59,54 @@ flowchart TD
 - **Multi-Tab Behavior:** `persistentMultipleTabManager()` coordinates synchronization across multiple open browser tabs so writes made in Tab A update Tab B without write collisions.
 - **Web Privacy & Security Consideration:** Because IndexedDB persists locally in the browser profile, users on shared or public workstations must be warned to sign out or use private/incognito browsing to avoid leaving cached task data on disk.
 
-### Data Abstraction Interface
-Components and Zustand stores interact exclusively with a shared interface (`firestore.ts`). Metro bundler resolves `firestore.native.ts` for Android builds and `firestore.web.ts` for web builds.
+### Data Abstraction Interface & Timestamp Type Decoupling
+To ensure complete type compatibility across both SDKs without build errors:
+- **Domain Timestamp Interface:** The shared types do NOT import `Timestamp` directly from `firebase/firestore` or `@react-native-firebase/firestore`. Instead, domain models use an agnostic interface `AppTimestamp` with standard seconds/nanoseconds representations and helper conversion methods (`toDate()`, `toMillis()`).
+- Platform adapters (`firestore.native.ts` and `firestore.web.ts`) handle bidirectionally mapping their respective native SDK `Timestamp` objects to and from the domain `AppTimestamp`.
 
 ---
 
 ## 3. Data Model & Timestamp Contract
 
 ### Storage & Display Rules
-1. **UTC Storage:** All date-time fields (`plannedStart`, `plannedEnd`, `actualStart`, `actualEnd`, `createdAt`, `updatedAt`, `cancelledAt`) are stored strictly as UTC `Timestamp` objects.
+1. **UTC Storage:** All date-time fields (`plannedStart`, `plannedEnd`, `actualStart`, `actualEnd`, `createdAt`, `updatedAt`, `cancelledAt`) are stored strictly as UTC `AppTimestamp` objects.
 2. **IST Display & Querying:** The `date` field is stored as an ISO date string (`"YYYY-MM-DD"`) evaluated in **IST (Asia/Kolkata, UTC+5:30)**. Queries like *"give me today's timetable"* query by `date == "YYYY-MM-DD"` to avoid timezone rollover discrepancies around midnight.
-3. **Write-Once Actual Execution Times:**
+3. **Write-Once Actual Execution Times & Reopen History:**
    - `actualStart` is set when the user triggers "Start now".
    - `actualEnd` is set when the user triggers "Finish".
    - Neither field is overwritten when editing planned times, titles, categories, or notes.
-4. **Reopening Completed Tasks:** If a task was marked `done` by mistake, a deliberate "Reopen" action resets `status` to `in_progress` while **preserving existing `actualStart` and `actualEnd` timestamps** for auditing.
-5. **Deterministic Task IDs for Routine Generation:**
-   - Routine instances use deterministic IDs formatted as: `${sourceTemplateId}_${date}_${blockIndex}` (e.g., `default_weekday_2026-11-08_0`).
-   - If multiple devices (phone and web) trigger routine generation for the same upcoming days, they target identical document paths in Firestore, completely eliminating duplicate tasks.
+   - **Reopening Completed Tasks:** If a task was marked `done` by mistake, a deliberate "Reopen" action:
+     - Moves current `{ actualStart, actualEnd, completedAt }` into an audit array: `actualHistory: ActualTimeEntry[]`.
+     - Resets `actualStart` and `actualEnd` to `null`.
+     - Changes `status` back to `in_progress`.
+     - This preserves past time records while enabling a fresh Start/Finish sequence.
+4. **Idempotent Routine Generation (Create-If-Not-Exists):**
+   - Deterministic task IDs format: `${sourceTemplateId}_${date}_${blockId}` (using stable string `blockId`, e.g. `career_morning`, rather than array index).
+   - Generated using **create-if-not-exists transactions** (`transaction.get()` then create only if missing).
+   - If a document already exists at that ID (whether pending, in progress, completed, or custom-edited), it is **never overwritten**.
+   - Multiple devices running generation simultaneously will cleanly no-op on existing records.
 
-### Complete TypeScript Schema
+### Complete TypeScript Domain Schema
 
 ```typescript
-import { Timestamp } from 'firebase/firestore';
-
 export type TaskPriority = 'high' | 'medium' | 'low';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
+
+/** Platform-independent Timestamp interface compatible with both Web and Native Firebase SDKs */
+export interface AppTimestamp {
+  seconds: number;
+  nanoseconds: number;
+  toDate(): Date;
+  toMillis(): number;
+}
+
+export interface ActualTimeEntry {
+  actualStart: AppTimestamp;
+  actualEnd: AppTimestamp;
+  completedAt: AppTimestamp;
+  reopenedAt: AppTimestamp;
+}
 
 export interface RecurrenceRule {
   type: 'daily' | 'weekdays' | 'weekly' | 'custom';
@@ -94,16 +115,17 @@ export interface RecurrenceRule {
 }
 
 export interface Task {
-  id: string;                           // Generated or deterministic: `${templateId}_${date}_${index}`
+  id: string;                           // Deterministic: `${templateId}_${date}_${blockId}`
   title: string;                        // Required, 1-200 characters
   category: string;                     // Required (e.g. "Career", "Learning", "Health")
   priority: TaskPriority;               // Required: 'high' | 'medium' | 'low'
   date: string;                         // Required: "YYYY-MM-DD" in IST
-  plannedStart: Timestamp;              // Required: UTC Timestamp
-  plannedEnd: Timestamp;                // Required: UTC Timestamp, must be > plannedStart
+  plannedStart: AppTimestamp;           // Required: UTC Timestamp
+  plannedEnd: AppTimestamp;             // Required: UTC Timestamp, must be > plannedStart
   durationMin: number;                  // Required: 5 to 480 minutes
-  actualStart: Timestamp | null;        // Write-once on start, nullable
-  actualEnd: Timestamp | null;          // Write-once on finish, nullable
+  actualStart: AppTimestamp | null;     // Write-once on start, nullable
+  actualEnd: AppTimestamp | null;       // Write-once on finish, nullable
+  actualHistory: ActualTimeEntry[];     // Archived execution runs from reopened sessions
   status: TaskStatus;                   // Required: pending | in_progress | done | skipped | cancelled
   isFixed: boolean;                     // Flag for fixed commitments (Phase 3 protection)
   recurrenceRule: RecurrenceRule | null;// Recurrence definition or null
@@ -114,13 +136,13 @@ export interface Task {
   notificationIds: string[];            // expo-notifications scheduled IDs
   notes: string;                        // Optional text notes
   links: string[];                      // Optional web URLs
-  cancelledAt: Timestamp | null;        // UTC Timestamp when cancelled
-  createdAt: Timestamp;                 // UTC Timestamp
-  updatedAt: Timestamp;                 // UTC Timestamp
+  cancelledAt: AppTimestamp | null;     // UTC Timestamp when cancelled
+  createdAt: AppTimestamp;              // UTC Timestamp
+  updatedAt: AppTimestamp;              // UTC Timestamp
 }
 
 export interface RoutineBlock {
-  blockIndex: number;                   // 0-indexed position in routine
+  blockId: string;                      // Stable identifier (e.g. "career_am", "exercise_pm")
   title: string;                        // e.g. "Morning Career Work"
   category: string;                     // e.g. "Career"
   priority: TaskPriority;
@@ -133,11 +155,11 @@ export interface RoutineBlock {
 export interface RoutineTemplate {
   id: string;                           // e.g. "default_weekday"
   name: string;                         // e.g. "Default Weekday Routine"
-  blocks: RoutineBlock[];               // Ordered schedule blocks
+  blocks: RoutineBlock[];               // Ordered schedule blocks with stable blockIds
   daysOfWeek: number[];                 // [1, 2, 3, 4, 5] for Mon-Fri
   isActive: boolean;                    // Active toggle
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: AppTimestamp;
+  updatedAt: AppTimestamp;
 }
 
 export interface UserSettings {
@@ -147,8 +169,8 @@ export interface UserSettings {
   wakeUpTime: string;                   // "08:00" in IST
   windDownTime: string;                 // "22:45" in IST
   batteryOptimizationDismissed: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: AppTimestamp;
+  updatedAt: AppTimestamp;
 }
 ```
 
@@ -156,7 +178,7 @@ export interface UserSettings {
 ```
 [pending]     ──> [in_progress], [skipped], [cancelled]
 [in_progress] ──> [done], [skipped], [cancelled]
-[done]        ──> [in_progress] (deliberate Reopen action)
+[done]        ──> [in_progress] (deliberate Reopen: archives to actualHistory)
 [skipped]     ──> [pending]
 [cancelled]   ──> (terminal)
 ```
@@ -170,42 +192,42 @@ export interface UserSettings {
 - **Safety Net Daily Repeating Alarms:** Wake-up (`08:00` IST) and Wind-down (`22:45` IST) are scheduled as **repeating daily local alarms**. Even if the user does not open the app for several days, wake-up and sleep alarms will continue to fire.
 
 ### Exact Alarm vs Best-Effort Delivery
-- **`alarmClock` Delivery:** Uses Android `AlarmManager.setAlarmClock()`. Wakes the CPU, bypasses system Doze mode and OEM battery-saving windows, and renders a persistent alarm clock icon in the Android status bar.
-- **`bestEffort` Delivery:** Default delivery mode on Android when exact alarm permissions are absent. The OS batches notifications to preserve battery, causing delivery delays of 5–15 minutes.
+- **`alarmClock` Delivery:** Uses Android `AlarmManager.setAlarmClock()`. Intended to wake the device CPU for time-critical alarms.
+  - **Reference:** Introduced in `expo-notifications` (Expo SDK 58, PR `#49687`: [Expo Notifications Changelog](https://github.com/expo/expo/blob/main/packages/expo-notifications/CHANGELOG.md)).
+  - **Verification Status:** **UNVERIFIED on our physical hardware**. OEM battery optimizations (MIUI/HyperOS, ColorOS, OneUI) may still restrict background alarms; full reliability will be tested in **Step 3.5**. If unverified or failing, **Notifee** will be evaluated as a native alternative.
+- **`bestEffort` Delivery:** Default delivery mode when exact alarm permissions are absent or rejected. The OS batches notifications, causing delivery delays of 5–15 minutes.
 - **Which Reminders Use Exact Delivery:**
   1. Task start alarms where `isFixed == true` (time-critical commitments).
   2. Daily Wake-up and Wind-down safety net alarms.
-  3. Non-fixed tasks fallback to `bestEffort` if the user declines `SCHEDULE_EXACT_ALARM` permissions.
+  3. Non-fixed tasks fallback to `bestEffort` if `SCHEDULE_EXACT_ALARM` permissions are not granted.
 
-### Exact Alarm Verification Status
-- Supported in modern `expo-notifications` (starting Expo SDK 58, PR `#49687`, utilizing `delivery: 'alarmClock'`).
-- **Status:** **UNVERIFIED on our physical device**. We will experimentally validate this during **Step 3.5 (Early Real-Device Alarm Test)**. If `expo-notifications` does not wake the device reliably during testing, **Notifee** will be evaluated as the alternative native alarm engine.
-
-### Android Permission Flow
+### Android Permission Flow & Revocation Handling
 1. **Android 13+ (`POST_NOTIFICATIONS`):** Requested after creating an `IMPORTANCE_HIGH` notification channel.
-2. **Android 14+ (`SCHEDULE_EXACT_ALARM`):** Denied by default on fresh installs. The app checks `getExactAlarmPermissionsAsync()` and guides the user via deep-link to **Settings → Alarms & reminders**.
-3. **Foreground Self-Healing Resync:** Whenever the app enters foreground (`AppState === 'active'`), it reconciles server tasks with active device notification IDs, dropping obsolete alarms and rescheduling updated ones.
+2. **Android 14+ (`SCHEDULE_EXACT_ALARM`):** Denied by default on fresh installs.
+3. **Handling Permission Revocation:** If a user revokes `SCHEDULE_EXACT_ALARM` in system settings, Android automatically cancels all registered exact alarms. Therefore, our **foreground resync** runs on every app launch (`AppState === 'active'`), verifies current alarm permission state, and re-registers the entire 7-day window accordingly.
 
 ---
 
 ## 5. Backup & Recovery Protocol (JSON Export/Import)
-1. **Export:** Generates a full snapshot (`tasks`, `routineTemplates`, `settings`) as a single JSON file downloaded to device storage.
-2. **Import ("Replace All"):**
-   - **Safety First:** The app automatically generates and downloads an in-memory safety backup of the existing state before replacing data.
-   - **Notification Cleanup:** After import, all old scheduled alarms are cancelled, and fresh notifications are scheduled for the imported 7-day window.
+1. **Export:** Generates a full snapshot (`tasks`, `routineTemplates`, `settings`) as a single JSON file.
+2. **Import ("Replace All") with Mandatory Pre-Backup:**
+   - **Verification Requirement:** The application **will not proceed** with a "Replace All" wipe until it has verified that the existing state has been successfully serialized and saved to device storage:
+     - **Web:** Verified by generating a download blob and triggering standard browser file-save completion.
+     - **Android:** Verified by writing the backup file via `expo-file-system` / `expo-sharing` to the user's Downloads/Documents folder and confirming non-zero byte size on disk.
+   - If the pre-backup creation fails or is cancelled, the import aborts immediately with an error dialog, leaving existing data untouched.
+   - Following verified replacement, all old alarms are cleared and fresh alarms are scheduled for the 7-day window.
 
 ---
 
 ## 6. Firestore Security Rules
 
-Rules enforce server-side validation on field types, ownership, time constraints, and duration limits:
+Hardened security rules restrict schema keys, validate ownership, enforce duration boundaries, ensure write-once actual times on updates, and validate routine templates and settings structures:
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -214,8 +236,20 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
-    function isValidTask(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() <= 200
+    // Task Document Validation
+    function isValidTaskData(data) {
+      let allowedKeys = [
+        'id', 'title', 'category', 'priority', 'date',
+        'plannedStart', 'plannedEnd', 'durationMin',
+        'actualStart', 'actualEnd', 'actualHistory',
+        'status', 'isFixed', 'recurrenceRule',
+        'parentRecurringTaskId', 'isFromTemplate', 'sourceTemplateId',
+        'reminderMinutesBefore', 'notificationIds', 'notes', 'links',
+        'cancelledAt', 'createdAt', 'updatedAt'
+      ];
+
+      return data.keys().hasOnly(allowedKeys)
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
         && data.category is string && data.category.size() > 0
         && data.priority in ['high', 'medium', 'low']
         && data.status in ['pending', 'in_progress', 'done', 'skipped', 'cancelled']
@@ -226,29 +260,86 @@ service cloud.firestore {
         && data.durationMin is int && data.durationMin >= 5 && data.durationMin <= 480
         && (data.actualStart == null || data.actualStart is timestamp)
         && (data.actualEnd == null || data.actualEnd is timestamp)
-        && data.isFixed is bool;
+        && data.actualHistory is list
+        && data.isFixed is bool
+        && (data.reminderMinutesBefore == null || (data.reminderMinutesBefore is int && data.reminderMinutesBefore >= 0))
+        && data.notificationIds is list
+        && data.notes is string
+        && data.links is list
+        && (data.cancelledAt == null || data.cancelledAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
-    // User data subcollections
+    // Enforce Valid Status Transitions
+    function isValidStatusTransition(oldStatus, newStatus) {
+      return (oldStatus == newStatus)
+        || (oldStatus == 'pending' && newStatus in ['in_progress', 'skipped', 'cancelled'])
+        || (oldStatus == 'in_progress' && newStatus in ['done', 'skipped', 'cancelled'])
+        || (oldStatus == 'done' && newStatus == 'in_progress') // Reopen
+        || (oldStatus == 'skipped' && newStatus == 'pending');
+    }
+
+    // Write-Once Enforcement: Prevents overwriting already recorded actual times during standard updates
+    function isActualTimesProtected(existing, incoming) {
+      let preservesStart = (existing.actualStart == null) || (incoming.actualStart == existing.actualStart) || (incoming.status == 'in_progress' && existing.status == 'done');
+      let preservesEnd = (existing.actualEnd == null) || (incoming.actualEnd == existing.actualEnd) || (incoming.status == 'in_progress' && existing.status == 'done');
+      return preservesStart && preservesEnd;
+    }
+
+    // Routine Template Document Validation
+    function isValidRoutineTemplate(data) {
+      let allowedKeys = ['id', 'name', 'blocks', 'daysOfWeek', 'isActive', 'createdAt', 'updatedAt'];
+      return data.keys().hasOnly(allowedKeys)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.blocks is list
+        && data.daysOfWeek is list
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Settings Document Validation
+    function isValidSettings(data) {
+      let allowedKeys = ['defaultReminderMinutesBefore', 'theme', 'categories', 'wakeUpTime', 'windDownTime', 'batteryOptimizationDismissed', 'createdAt', 'updatedAt'];
+      return data.keys().hasOnly(allowedKeys)
+        && data.defaultReminderMinutesBefore is int && data.defaultReminderMinutesBefore >= 0
+        && data.theme in ['light', 'dark', 'system']
+        && data.categories is list && data.categories.size() > 0
+        && data.wakeUpTime is string && data.wakeUpTime.matches('^\\d{2}:\\d{2}$')
+        && data.windDownTime is string && data.windDownTime.matches('^\\d{2}:\\d{2}$')
+        && data.batteryOptimizationDismissed is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // User Subcollections
     match /users/{uid} {
       allow read, write: if isOwner(uid);
 
       match /tasks/{taskId} {
         allow read: if isOwner(uid);
-        allow create, update: if isOwner(uid) && isValidTask(request.resource.data);
+        allow create: if isOwner(uid) && isValidTaskData(request.resource.data);
+        allow update: if isOwner(uid)
+          && isValidTaskData(request.resource.data)
+          && isValidStatusTransition(resource.data.status, request.resource.data.status)
+          && isActualTimesProtected(resource.data, request.resource.data);
         allow delete: if isOwner(uid);
       }
 
       match /routineTemplates/{templateId} {
-        allow read, write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidRoutineTemplate(request.resource.data);
+        allow delete: if isOwner(uid);
       }
 
       match /settings/{settingId} {
-        allow read, write: if isOwner(uid);
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidSettings(request.resource.data);
+        allow delete: if isOwner(uid);
       }
     }
 
-    // Default deny all other paths
     match /{document=**} {
       allow read, write: if false;
     }
