@@ -49,6 +49,9 @@ pnpm-debug.log*
 # OS / Editor specific
 .DS_Store
 Thumbs.db
+*.zip
+*.tar.gz
+Thumbs.db
 *.pem
 .vscode/*
 !.vscode/settings.json

@@ -149,3 +149,18 @@ This document records architectural choices, evaluation of alternatives, and imp
 - Stores all entities within a versioned envelope (`schemaVersion: 1`).
 - Persists theme preferences and settings across app restarts via `getSettings()` / `saveSettings()`.
 - Swapping to a cloud adapter in Step 3/4 requires zero changes to UI components or Zustand stores.
+
+---
+
+## Decision 016 — Step B0: Milestone A Hardening & Resilience Specifications
+**Date:** 2026-11-07  
+**Status:** Proposed — Awaiting Review (Claude & ChatGPT)  
+
+**Decision:** Prior to starting Milestone B (Firebase), execute Step B0 hardening on `feat/topics-tasks-timetable`:
+1. **Corruption Protection & Write-Lock:** On JSON parse error or unsupported future schema version, preserve raw data at `@time_mgmt_app_data_recovery_<timestamp>`, lock writes, and offer UI options to export raw data or explicitly reset.
+2. **Verified File Export:** Verify written file existence, non-zero size, and parseability on Android before showing success and triggering `expo-sharing`.
+3. **Validated Import & Pre-Backup:** Full schema validation (types, referential integrity), merge ID collision remapping, and mandatory verified pre-backup before Replace-All (aborts immediately on pre-backup failure).
+4. **Storage Provider Factory:** Decouple stores via `getStorage(): IStorageAdapter`.
+5. **Clean Domain Model:** Drop redundant `UserSettings.categories` and deep-copy initial defaults.
+6. **Unified Cascade Logic:** Consolidate all cascade/move mutations inside the storage adapter.
+7. **Gapped sortOrder:** Items spaced by multiples of 1024, writing only the moved item on reorders, with deterministic `(sortOrder, id)` tie-breaks and automatic collapse re-normalization.
