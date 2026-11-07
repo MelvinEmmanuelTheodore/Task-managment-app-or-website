@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useColorScheme } from 'react-native';
-import { storageAdapter } from '../services/storage/AsyncStorageAdapter';
+import { getStorage } from '../services/storage';
 import { dateToAppTimestamp } from '../utils/dateHelpers';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -18,7 +18,7 @@ export const useThemeStore = create<ThemeState>((set) => ({
 
   initTheme: async () => {
     try {
-      const settings = await storageAdapter.getSettings();
+      const settings = await getStorage().getSettings();
       if (settings && settings.theme) {
         set({ themePreference: settings.theme, isInitialized: true });
       } else {
@@ -32,13 +32,13 @@ export const useThemeStore = create<ThemeState>((set) => ({
   setThemePreference: async (pref: ThemePreference) => {
     set({ themePreference: pref });
     try {
-      const settings = await storageAdapter.getSettings();
+      const settings = await getStorage().getSettings();
       const updated = {
         ...settings,
         theme: pref,
         updatedAt: dateToAppTimestamp(new Date()),
       };
-      await storageAdapter.saveSettings(updated);
+      await getStorage().saveSettings(updated);
     } catch {
       // Keep optimistic memory update
     }

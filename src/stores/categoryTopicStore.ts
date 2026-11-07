@@ -3,10 +3,11 @@ import { Category, Priority } from '../types/category';
 import { Topic } from '../types/topic';
 import { TopicTask } from '../types/topicTask';
 import { TimetableBlock } from '../types/timetable';
-import { storageAdapter } from '../services/storage/AsyncStorageAdapter';
+import { getStorage } from '../services/storage';
 import { dateToAppTimestamp } from '../utils/dateHelpers';
 import { generateId } from '../utils/idGenerator';
 import { useTimetableStore } from './timetableStore';
+import { moveItemOrder, SORT_ORDER_STEP } from '../utils/sortOrder';
 
 interface CategoryTopicState {
   categories: Category[];
@@ -62,7 +63,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       return;
     }
     set({ isLoading: true });
-    const envelope = await storageAdapter.loadAll();
+    const envelope = await getStorage().loadAll();
     set({
       categories: envelope.categories,
       topics: envelope.topics,
@@ -79,14 +80,14 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       id: generateId('cat'),
       name: name.trim(),
       priority,
-      sortOrder: maxSort + 1,
+      sortOrder: maxSort + SORT_ORDER_STEP,
       color,
       createdAt: now,
       updatedAt: now,
     };
     const updated = [...existing, newCat];
     set({ categories: updated });
-    await storageAdapter.saveCategory(newCat);
+    await getStorage().saveCategory(newCat);
     return newCat;
   },
 
@@ -95,76 +96,55 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updatedCategory = { ...category, updatedAt: now };
     const updated = get().categories.map((c) => (c.id === category.id ? updatedCategory : c));
     set({ categories: updated });
-    await storageAdapter.saveCategory(updatedCategory);
+    await getStorage().saveCategory(updatedCategory);
   },
 
   reorderCategories: async (orderedIds) => {
     const now = dateToAppTimestamp(new Date());
     const updated = get().categories.map((c) => {
       const newOrder = orderedIds.indexOf(c.id);
-      return newOrder >= 0 ? { ...c, sortOrder: newOrder + 1, updatedAt: now } : c;
+      return newOrder >= 0 ? { ...c, sortOrder: (newOrder + 1) * SORT_ORDER_STEP, updatedAt: now } : c;
     });
     set({ categories: updated });
-    await storageAdapter.reorderCategories(orderedIds);
+    await getStorage().reorderCategories(orderedIds);
   },
 
   moveCategoryOrder: async (categoryId, direction) => {
-    const categories = [...get().categories].sort((a, b) => a.sortOrder - b.sortOrder);
-    const index = categories.findIndex((c) => c.id === categoryId);
-    if (index < 0) return;
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= categories.length) return;
+    const result = moveItemOrder(get().categories, categoryId, direction);
+    const now = dateToAppTimestamp(new Date());
+    const movedWithTs = { ...result.movedItem, updatedAt: now };
 
-    const [moved] = categories.splice(index, 1);
-    categories.splice(targetIndex, 0, moved);
-
-    const orderedIds = categories.map((c) => c.id);
-    await get().reorderCategories(orderedIds);
+    if (!result.reorderedAll) {
+      // O(1) single-item update
+      const updated = get().categories.map((c) => (c.id === categoryId ? movedWithTs : c));
+      set({ categories: updated });
+      await getStorage().saveCategory(movedWithTs);
+    } else {
+      // Gap collapsed: list re-normalized
+      const orderedIds = result.updatedItems.map((c) => c.id);
+      set({ categories: result.updatedItems });
+      await getStorage().reorderCategories(orderedIds);
+    }
   },
 
   deleteCategoryCascade: async (categoryId) => {
-    // Cascades: delete category, all topics under it, and all tasks under those topics
-    const { topics, topicTasks, categories } = get();
-    const topicIdsToDelete = new Set(topics.filter((t) => t.categoryId === categoryId).map((t) => t.id));
-
-    const updatedCategories = categories.filter((c) => c.id !== categoryId);
-    const updatedTopics = topics.filter((t) => t.categoryId !== categoryId);
-    const updatedTasks = topicTasks.filter((task) => !topicIdsToDelete.has(task.topicId));
-
+    const updatedEnvelope = await getStorage().deleteCategoryCascade(categoryId);
     set({
-      categories: updatedCategories,
-      topics: updatedTopics,
-      topicTasks: updatedTasks,
+      categories: updatedEnvelope.categories,
+      topics: updatedEnvelope.topics,
+      topicTasks: updatedEnvelope.topicTasks,
     });
-
-    // Synchronize in-memory timetable store immediately
-    useTimetableStore.setState((s) => ({
-      blocks: s.blocks.filter((b) => b.categoryId !== categoryId),
-    }));
-
-    await storageAdapter.deleteCategoryCascade(categoryId);
+    useTimetableStore.getState().setBlocksFromEnvelope(updatedEnvelope.timetableBlocks);
   },
 
   moveCategoryContentsAndDelete: async (fromCategoryId, toCategoryId) => {
-    const now = dateToAppTimestamp(new Date());
-    const { categories, topics } = get();
-    
-    // Reassign all topics from fromCategoryId to toCategoryId
-    const updatedTopics = topics.map((t) =>
-      t.categoryId === fromCategoryId ? { ...t, categoryId: toCategoryId, updatedAt: now } : t
-    );
-    const updatedCategories = categories.filter((c) => c.id !== fromCategoryId);
-
-    set({ categories: updatedCategories, topics: updatedTopics });
-
-    // Synchronize in-memory timetable store immediately
-    useTimetableStore.setState((s) => ({
-      blocks: s.blocks.map((b) =>
-        b.categoryId === fromCategoryId ? { ...b, categoryId: toCategoryId, updatedAt: now } : b
-      ),
-    }));
-
-    await storageAdapter.moveCategoryContentsAndDelete(fromCategoryId, toCategoryId);
+    const updatedEnvelope = await getStorage().moveCategoryContentsAndDelete(fromCategoryId, toCategoryId);
+    set({
+      categories: updatedEnvelope.categories,
+      topics: updatedEnvelope.topics,
+      topicTasks: updatedEnvelope.topicTasks,
+    });
+    useTimetableStore.getState().setBlocksFromEnvelope(updatedEnvelope.timetableBlocks);
   },
 
   addTopic: async (categoryId, name, priority = 'medium') => {
@@ -176,14 +156,14 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       categoryId,
       name: name.trim(),
       priority,
-      sortOrder: maxSort + 1,
+      sortOrder: maxSort + SORT_ORDER_STEP,
       isActive: true,
       createdAt: now,
       updatedAt: now,
     };
     const updated = [...get().topics, newTopic];
     set({ topics: updated });
-    await storageAdapter.saveTopic(newTopic);
+    await getStorage().saveTopic(newTopic);
     return newTopic;
   },
 
@@ -192,7 +172,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updatedTopic = { ...topic, updatedAt: now };
     const updated = get().topics.map((t) => (t.id === topic.id ? updatedTopic : t));
     set({ topics: updated });
-    await storageAdapter.saveTopic(updatedTopic);
+    await getStorage().saveTopic(updatedTopic);
   },
 
   toggleTopicActive: async (topicId) => {
@@ -202,7 +182,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updatedTopic = { ...topic, isActive: !topic.isActive, updatedAt: now };
     const updated = get().topics.map((t) => (t.id === topicId ? updatedTopic : t));
     set({ topics: updated });
-    await storageAdapter.saveTopic(updatedTopic);
+    await getStorage().saveTopic(updatedTopic);
   },
 
   reorderTopics: async (categoryId, orderedIds) => {
@@ -210,35 +190,39 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updated = get().topics.map((t) => {
       if (t.categoryId !== categoryId) return t;
       const order = orderedIds.indexOf(t.id);
-      return order >= 0 ? { ...t, sortOrder: order + 1, updatedAt: now } : t;
+      return order >= 0 ? { ...t, sortOrder: (order + 1) * SORT_ORDER_STEP, updatedAt: now } : t;
     });
     set({ topics: updated });
-    await storageAdapter.reorderTopics(categoryId, orderedIds);
+    await getStorage().reorderTopics(categoryId, orderedIds);
   },
 
   moveTopicOrder: async (topicId, direction) => {
     const topic = get().topics.find((t) => t.id === topicId);
     if (!topic) return;
-    const catTopics = get().topics
-      .filter((t) => t.categoryId === topic.categoryId)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-    const index = catTopics.findIndex((t) => t.id === topicId);
-    if (index < 0) return;
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= catTopics.length) return;
+    const catTopics = get().topics.filter((t) => t.categoryId === topic.categoryId);
+    const result = moveItemOrder(catTopics, topicId, direction);
+    const now = dateToAppTimestamp(new Date());
+    const movedWithTs = { ...result.movedItem, updatedAt: now };
 
-    const [moved] = catTopics.splice(index, 1);
-    catTopics.splice(targetIndex, 0, moved);
-
-    const orderedIds = catTopics.map((t) => t.id);
-    await get().reorderTopics(topic.categoryId, orderedIds);
+    if (!result.reorderedAll) {
+      // O(1) single-item update
+      const updated = get().topics.map((t) => (t.id === topicId ? movedWithTs : t));
+      set({ topics: updated });
+      await getStorage().saveTopic(movedWithTs);
+    } else {
+      // Gap collapsed: list re-normalized
+      const orderedIds = result.updatedItems.map((t) => t.id);
+      const remainingTopics = get().topics.filter((t) => t.categoryId !== topic.categoryId);
+      set({ topics: [...remainingTopics, ...result.updatedItems] });
+      await getStorage().reorderTopics(topic.categoryId, orderedIds);
+    }
   },
 
   deleteTopic: async (topicId) => {
     const updatedTopics = get().topics.filter((t) => t.id !== topicId);
     const updatedTasks = get().topicTasks.filter((t) => t.topicId !== topicId);
     set({ topics: updatedTopics, topicTasks: updatedTasks });
-    await storageAdapter.deleteTopic(topicId);
+    await getStorage().deleteTopic(topicId);
   },
 
   addTask: async (topicId, title, priority = 'medium', dueDate = null, notes = '') => {
@@ -257,7 +241,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     };
     const updated = [...get().topicTasks, newTask];
     set({ topicTasks: updated });
-    await storageAdapter.saveTopicTask(newTask);
+    await getStorage().saveTopicTask(newTask);
     return newTask;
   },
 
@@ -266,7 +250,7 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updatedTask = { ...task, updatedAt: now };
     const updated = get().topicTasks.map((t) => (t.id === task.id ? updatedTask : t));
     set({ topicTasks: updated });
-    await storageAdapter.saveTopicTask(updatedTask);
+    await getStorage().saveTopicTask(updatedTask);
   },
 
   toggleTaskComplete: async (taskId) => {
@@ -282,13 +266,13 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     };
     const updated = get().topicTasks.map((t) => (t.id === taskId ? updatedTask : t));
     set({ topicTasks: updated });
-    await storageAdapter.saveTopicTask(updatedTask);
+    await getStorage().saveTopicTask(updatedTask);
   },
 
   deleteTask: async (taskId) => {
     const updated = get().topicTasks.filter((t) => t.id !== taskId);
     set({ topicTasks: updated });
-    await storageAdapter.deleteTopicTask(taskId);
+    await getStorage().deleteTopicTask(taskId);
   },
 
   getTopicsByCategory: (categoryId, includeInactive = false) => {

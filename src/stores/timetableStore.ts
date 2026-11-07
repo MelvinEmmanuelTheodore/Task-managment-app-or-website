@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { TimetableBlock } from '../types/timetable';
-import { storageAdapter } from '../services/storage/AsyncStorageAdapter';
+import { getStorage } from '../services/storage';
 import { dateToAppTimestamp, getCurrentISTDate } from '../utils/dateHelpers';
 import { generateId } from '../utils/idGenerator';
 import { Priority } from '../types/category';
@@ -13,6 +13,7 @@ interface TimetableState {
   // Actions
   loadInitialBlocks: (force?: boolean) => Promise<void>;
   setSelectedDate: (date: string) => void;
+  setBlocksFromEnvelope: (blocks: TimetableBlock[]) => void;
   addBlock: (params: {
     title: string;
     categoryId: string;
@@ -35,12 +36,14 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
   selectedDate: getCurrentISTDate(),
   isLoading: true,
 
+  setBlocksFromEnvelope: (blocks) => set({ blocks }),
+
   loadInitialBlocks: async (force = false) => {
     if (!force && get().blocks.length > 0) {
       return;
     }
     set({ isLoading: true });
-    const blocks = await storageAdapter.getTimetableBlocks();
+    const blocks = await getStorage().getTimetableBlocks();
     set({ blocks, isLoading: false });
   },
 
@@ -68,7 +71,7 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
     };
     const updated = [...get().blocks, newBlock];
     set({ blocks: updated });
-    await storageAdapter.saveTimetableBlock(newBlock);
+    await getStorage().saveTimetableBlock(newBlock);
     return newBlock;
   },
 
@@ -77,13 +80,13 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
     const updatedBlock: TimetableBlock = { ...block, updatedAt: now };
     const updated = get().blocks.map((b) => (b.id === block.id ? updatedBlock : b));
     set({ blocks: updated });
-    await storageAdapter.saveTimetableBlock(updatedBlock);
+    await getStorage().saveTimetableBlock(updatedBlock);
   },
 
   deleteBlock: async (blockId) => {
     const updated = get().blocks.filter((b) => b.id !== blockId);
     set({ blocks: updated });
-    await storageAdapter.deleteTimetableBlock(blockId);
+    await getStorage().deleteTimetableBlock(blockId);
   },
 
   getBlocksForDate: (date) => {

@@ -154,7 +154,7 @@ This document records architectural choices, evaluation of alternatives, and imp
 
 ## Decision 016 — Step B0: Milestone A Hardening & Resilience Specifications
 **Date:** 2026-11-07  
-**Status:** Proposed — Awaiting Review (User & ChatGPT)  
+**Status:** Approved by User (2026-11-07)  
 
 **Decision:** Prior to starting Milestone B (Firebase), execute Step B0 hardening on `feat/topics-tasks-timetable`:
 1. **SDK 58 Package Alignment & Modern File/Paths API:** Use Expo SDK 58 compatible versions (`expo-file-system: ~58.0.11`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`). Strictly use the modern `File`/`Paths` API (`new File(Paths.cache, ...)`) across all native filesystem workflows; avoid mixing with legacy `FileSystem.writeAsStringAsync`.

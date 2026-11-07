@@ -37,11 +37,18 @@ export interface IStorageAdapter {
   // Export / Import
   exportAllData(): Promise<string>;
   importAllData(jsonString: string): Promise<StoredDataEnvelope>;
+  mergeAllData(incomingEnvelope: StoredDataEnvelope): Promise<StoredDataEnvelope>;
+  replaceAllData(incomingEnvelope: StoredDataEnvelope): Promise<StoredDataEnvelope>;
+
+  // Resilience & Rollback
+  isStorageLocked(): boolean;
+  getCorruptionError(): string | null;
+  createRollbackSnapshot(): Promise<string>;
 
   // Atomic Multi-Record Mutations (Transactional Queue)
   mutateEnvelope(mutator: (envelope: StoredDataEnvelope) => void | Promise<void>): Promise<StoredDataEnvelope>;
   reorderCategories(orderedIds: string[]): Promise<void>;
   reorderTopics(categoryId: string, orderedIds: string[]): Promise<void>;
-  deleteCategoryCascade(categoryId: string): Promise<void>;
-  moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<void>;
+  deleteCategoryCascade(categoryId: string): Promise<StoredDataEnvelope>;
+  moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<StoredDataEnvelope>;
 }

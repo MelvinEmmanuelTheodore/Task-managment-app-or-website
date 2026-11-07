@@ -20,14 +20,14 @@
   - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
   - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
-- [ ] **Step B0: Milestone A Hardening & Resilience** *(Plan documented in STEP_B0_PLAN.md & Decision 016; Awaiting Review)*
-  - [ ] 1. Write-lock on storage corruption & raw recovery key preservation
-  - [ ] 2. Verified export with file existence/size validation and `expo-sharing`
-  - [ ] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), required external backup acknowledgement & internal rollback snapshot verification
-  - [ ] 4. Storage provider factory (`getStorage()`)
-  - [ ] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
-  - [ ] 6. Consolidated cascade and move logic in storage adapter
-  - [ ] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
+- [x] **Step B0: Milestone A Hardening & Resilience** *(Completed & Audited on branch `feat/topics-tasks-timetable`)*
+  - [x] 1. Write-lock on storage corruption & raw recovery key preservation
+  - [x] 2. Verified export with file existence/size validation and `expo-sharing`
+  - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), required external backup acknowledgement & internal rollback snapshot verification
+  - [x] 4. Storage provider factory (`getStorage()`)
+  - [x] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
+  - [x] 6. Consolidated cascade and move logic in storage adapter
+  - [x] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build *(Postponed to Milestone B)*
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B)*
 - [ ] Step 4: Data Layer & Offline Sync

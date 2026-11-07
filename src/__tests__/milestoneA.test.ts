@@ -97,9 +97,9 @@ describe('Milestone A Audit Verification Suite', () => {
 
       const storageData = await adapter.loadAll();
 
-      // 1. Verify category reorder was saved
+      // 1. Verify category reorder was saved (gapped multiples of 1024)
       const careerCat = storageData.categories.find((c) => c.id === initialCatIds[0]);
-      expect(careerCat?.sortOrder).toBe(initialCatIds.length);
+      expect(careerCat?.sortOrder).toBe(initialCatIds.length * 1024);
 
       // 2. Verify both concurrent tasks were saved without loss
       expect(storageData.topicTasks.some((t) => t.title === 'Concurrent Task 1')).toBe(true);

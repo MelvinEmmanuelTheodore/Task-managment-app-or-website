@@ -8,24 +8,44 @@ import { TimetableBlock } from '../../types/timetable';
 import { UserSettings } from '../../types/settings';
 import { DEFAULT_CATEGORIES, DEFAULT_TOPICS } from '../../constants/defaultData';
 import { dateToAppTimestamp } from '../../utils/dateHelpers';
+import { validateBackupPayload, mergeBackupEnvelopes } from '../../utils/backupValidator';
 
-const STORAGE_KEY = '@time_mgmt_app_data_v1';
+export const STORAGE_KEY = '@time_mgmt_app_data_v1';
+export const RECOVERY_KEY_PREFIX = '@time_mgmt_app_data_recovery_';
+export const PRE_MIGRATION_KEY_PREFIX = '@time_mgmt_pre_migration_v1_';
+export const SNAPSHOT_KEY_PREFIX = '@time_mgmt_internal_rollback_snapshot_';
 
 export class AsyncStorageAdapter implements IStorageAdapter {
   private writeQueue: Promise<void> = Promise.resolve();
+  private isLocked = false;
+  private corruptionError: string | null = null;
+
+  isStorageLocked(): boolean {
+    return this.isLocked;
+  }
+
+  getCorruptionError(): string | null {
+    return this.corruptionError;
+  }
+
+  /** Emergency / test reset for locked storage */
+  clearLock(): void {
+    this.isLocked = false;
+    this.corruptionError = null;
+  }
 
   private getInitialData(): StoredDataEnvelope {
     const now = dateToAppTimestamp(new Date());
     return {
       schemaVersion: 1,
-      categories: DEFAULT_CATEGORIES,
-      topics: DEFAULT_TOPICS,
+      // Deep copy default collections so module constants are never mutated
+      categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
+      topics: JSON.parse(JSON.stringify(DEFAULT_TOPICS)),
       topicTasks: [],
       timetableBlocks: [],
       settings: {
         defaultReminderMinutesBefore: 5,
         theme: 'dark',
-        categories: DEFAULT_CATEGORIES.map((c) => c.name),
         wakeUpTime: '08:00',
         windDownTime: '22:45',
         batteryOptimizationDismissed: false,
@@ -39,10 +59,69 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   private enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.writeQueue = this.writeQueue
-        .then(() => op())
+        .then(() => {
+          if (this.isLocked) {
+            throw new Error(`Storage is locked due to data corruption: ${this.corruptionError}`);
+          }
+          return op();
+        })
         .then(resolve)
         .catch(reject);
     });
+  }
+
+  /**
+   * Internal reader with corruption detection and recovery key preservation.
+   * If parsing fails or future schema version is encountered:
+   * - Preserves raw value to a timestamped recovery key.
+   * - Locks writes (isLocked = true).
+   * - NEVER overwrites storage with defaults.
+   */
+  private async readOrRecover(): Promise<StoredDataEnvelope> {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (raw === null) {
+      // Truly absent key: seed initial defaults
+      const initial = this.getInitialData();
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
+      return initial;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err: any) {
+      this.isLocked = true;
+      this.corruptionError = `Corrupted JSON payload: ${err.message}`;
+
+      // Preserve raw data under recovery key
+      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
+      try {
+        await AsyncStorage.setItem(recoveryKey, raw);
+      } catch {
+        // If recovery copy write fails, original string stays intact under primary key.
+        // Writes remain locked and defaults are NEVER initialized.
+      }
+      return this.getInitialData();
+    }
+
+    if (typeof parsed.schemaVersion !== 'number' || parsed.schemaVersion > 1) {
+      this.isLocked = true;
+      this.corruptionError = `Unknown future schema version: ${parsed.schemaVersion}`;
+      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
+      try {
+        await AsyncStorage.setItem(recoveryKey, raw);
+      } catch {
+        // Retain original string intact under primary key
+      }
+      return this.getInitialData();
+    }
+
+    // Clean legacy settings.categories if present
+    if (parsed.settings && 'categories' in parsed.settings) {
+      delete parsed.settings.categories;
+    }
+
+    return parsed as StoredDataEnvelope;
   }
 
   /** Transactional mutation: queues read-modify-write sequentially to prevent lost updates */
@@ -50,21 +129,10 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     mutator: (envelope: StoredDataEnvelope) => void | Promise<void>
   ): Promise<StoredDataEnvelope> {
     return this.enqueueWrite(async () => {
-      let data: StoredDataEnvelope;
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        data = this.getInitialData();
-      } else {
-        try {
-          data = JSON.parse(raw);
-          if (data.schemaVersion !== 1) {
-            data = this.getInitialData();
-          }
-        } catch {
-          data = this.getInitialData();
-        }
+      const data = await this.readOrRecover();
+      if (this.isLocked) {
+        throw new Error(`Cannot mutate storage: storage is locked (${this.corruptionError})`);
       }
-
       await mutator(data);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       return data;
@@ -72,21 +140,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async loadAll(): Promise<StoredDataEnvelope> {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        const initial = this.getInitialData();
-        await this.saveAll(initial);
-        return initial;
-      }
-      const parsed: StoredDataEnvelope = JSON.parse(raw);
-      if (parsed.schemaVersion !== 1) {
-        return this.getInitialData();
-      }
-      return parsed;
-    } catch {
-      return this.getInitialData();
-    }
+    return this.readOrRecover();
   }
 
   async saveAll(envelope: StoredDataEnvelope): Promise<void> {
@@ -201,15 +255,81 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async importAllData(jsonString: string): Promise<StoredDataEnvelope> {
-    const parsed = JSON.parse(jsonString);
-    if (!parsed || parsed.schemaVersion !== 1) {
-      throw new Error('Invalid backup schema version.');
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonString);
+    } catch {
+      throw new Error('Invalid JSON format');
     }
-    if (!Array.isArray(parsed.categories) || !Array.isArray(parsed.topics)) {
-      throw new Error('Malformed backup payload.');
+    const validation = validateBackupPayload(parsed);
+    if (!validation.isValid || !validation.envelope) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
     }
-    await this.saveAll(parsed);
-    return parsed;
+    return this.replaceAllData(validation.envelope);
+  }
+
+  /**
+   * Creates an internal rollback snapshot before replacing all data.
+   * Verifies that the snapshot was written, is non-empty, and parses as JSON.
+   * Throws if verification fails.
+   */
+  async createRollbackSnapshot(): Promise<string> {
+    const snapshotKey = `${SNAPSHOT_KEY_PREFIX}${Date.now()}`;
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const contentToSnapshot = raw ?? JSON.stringify(this.getInitialData());
+
+    await AsyncStorage.setItem(snapshotKey, contentToSnapshot);
+
+    // Verify snapshot
+    const readBack = await AsyncStorage.getItem(snapshotKey);
+    if (!readBack || readBack.trim().length === 0) {
+      throw new Error('Internal rollback snapshot verification failed: snapshot is empty or missing');
+    }
+    try {
+      JSON.parse(readBack);
+    } catch {
+      throw new Error('Internal rollback snapshot verification failed: corrupted JSON in snapshot');
+    }
+
+    return snapshotKey;
+  }
+
+  /**
+   * Deterministically merges an incoming backup envelope into existing data.
+   */
+  async mergeAllData(incomingEnvelope: StoredDataEnvelope): Promise<StoredDataEnvelope> {
+    const validation = validateBackupPayload(incomingEnvelope);
+    if (!validation.isValid || !validation.envelope) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    return this.mutateEnvelope((localData) => {
+      const merged = mergeBackupEnvelopes(localData, validation.envelope!);
+      localData.categories = merged.categories;
+      localData.topics = merged.topics;
+      localData.topicTasks = merged.topicTasks;
+      localData.timetableBlocks = merged.timetableBlocks;
+      localData.settings = merged.settings;
+    });
+  }
+
+  /**
+   * Replaces all existing data with the validated incoming envelope.
+   * Strictly creates and verifies an internal rollback snapshot before replacing.
+   * If snapshot creation or verification fails, aborts with zero modifications.
+   */
+  async replaceAllData(incomingEnvelope: StoredDataEnvelope): Promise<StoredDataEnvelope> {
+    const validation = validateBackupPayload(incomingEnvelope);
+    if (!validation.isValid || !validation.envelope) {
+      throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+    }
+
+    // 1. Create and verify internal rollback snapshot
+    await this.createRollbackSnapshot();
+
+    // 2. Perform replacement
+    await this.saveAll(validation.envelope);
+    return validation.envelope;
   }
 
   async reorderCategories(orderedIds: string[]): Promise<void> {
@@ -217,7 +337,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     await this.mutateEnvelope((data) => {
       data.categories = data.categories.map((c) => {
         const newOrder = orderedIds.indexOf(c.id);
-        return newOrder >= 0 ? { ...c, sortOrder: newOrder + 1, updatedAt: now } : c;
+        return newOrder >= 0 ? { ...c, sortOrder: (newOrder + 1) * 1024, updatedAt: now } : c;
       });
     });
   }
@@ -228,13 +348,13 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       data.topics = data.topics.map((t) => {
         if (t.categoryId !== categoryId) return t;
         const newOrder = orderedIds.indexOf(t.id);
-        return newOrder >= 0 ? { ...t, sortOrder: newOrder + 1, updatedAt: now } : t;
+        return newOrder >= 0 ? { ...t, sortOrder: (newOrder + 1) * 1024, updatedAt: now } : t;
       });
     });
   }
 
-  async deleteCategoryCascade(categoryId: string): Promise<void> {
-    await this.mutateEnvelope((data) => {
+  async deleteCategoryCascade(categoryId: string): Promise<StoredDataEnvelope> {
+    return this.mutateEnvelope((data) => {
       const topicIdsToDelete = new Set(
         data.topics.filter((t) => t.categoryId === categoryId).map((t) => t.id)
       );
@@ -245,9 +365,9 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     });
   }
 
-  async moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<void> {
+  async moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<StoredDataEnvelope> {
     const now = dateToAppTimestamp(new Date());
-    await this.mutateEnvelope((data) => {
+    return this.mutateEnvelope((data) => {
       data.topics = data.topics.map((t) =>
         t.categoryId === fromCategoryId ? { ...t, categoryId: toCategoryId, updatedAt: now } : t
       );
@@ -260,4 +380,3 @@ export class AsyncStorageAdapter implements IStorageAdapter {
 }
 
 export const storageAdapter: IStorageAdapter = new AsyncStorageAdapter();
-
