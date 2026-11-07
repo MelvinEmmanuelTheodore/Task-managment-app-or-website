@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Step B0 Hardening Revisions & Review Follow-ups (`feat/topics-tasks-timetable`):**
+  - **Corruption Recovery & In-Memory Retention:** `AsyncStorageAdapter` retains the original raw payload in memory (`getRawCorruptedPayload`) if recovery-copy creation fails. Provided UI actions in Settings to view/copy the raw payload and retry recovery save (`retryRecovery`). Safely handles valid JSON with invalid envelope structures (e.g. `null`, numbers, arrays, objects missing `schemaVersion` or core collections) and returns an empty locked envelope (never presenting defaults as actual data while locked).
+  - **Sequential Version Migration with Preservation Safeguards:** Implemented sequential migration runner (`migrateVersion`) with pre-migration raw payload preservation under `@time_mgmt_pre_migration_v1_<timestamp>`. If preservation fails or content mismatches, migration immediately aborts leaving existing data completely untouched.
+  - **Replace-All Backup Export Enforcement:** Enforced that the user must successfully complete an external backup export operation before the external backup acknowledgement checkbox is enabled in the Replace-All modal.
+  - **Expanded Resilience Test Suite:** Added unit tests in `src/__tests__/stepB0.test.ts` covering recovery-copy write failure, raw payload in-memory retention, invalid envelope structure handling, migration preservation failure abort, rollback snapshot verification failure abort, and document picker/validation rejection (38 total tests passing).
+  - **Documentation Alignment:** Corrected status tracking across `DECISIONS.md`, `PROJECT_STATUS.md`, and `STEP_B0_PLAN.md` to clearly distinguish automated test results from physical Android device verification and final review gates.
+
+### Added
 - **Step B0 Hardening Implementation (`feat/topics-tasks-timetable`):**
   - **Storage Corruption Write-Lock & Recovery Preservation:** `AsyncStorageAdapter` captures JSON parse errors and unsupported future schema versions, immediately locks storage (`isLocked = true`) to prevent destructive overwrites, and preserves raw unparsed payloads under timestamped `@time_mgmt_app_data_recovery_<timestamp>` keys. Surfaces a prominent warning banner in Settings when locked.
   - **Verified File Export (Modern File/Paths API & `expo-sharing`):** Installed SDK 58 modules (`expo-file-system: ~58.0.13`, `expo-sharing: ~58.0.22`, `expo-document-picker: ~58.0.4`). Native export writes to `new File(Paths.cache, ...)`, asserts existence, size > 0, and JSON re-parseability before triggering `Sharing.shareAsync` with accurate user status *"Backup file ready: choose where to save it."* Web export downloads via Blob.

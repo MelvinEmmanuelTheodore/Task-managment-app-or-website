@@ -37,10 +37,12 @@ export default function SettingsScreen() {
   // Storage Lock State
   const [isLocked, setIsLocked] = useState(false);
   const [lockReason, setLockReason] = useState<string | null>(null);
+  const [showRawPayloadModal, setShowRawPayloadModal] = useState(false);
 
   // Import Preview State
   const [previewEnvelope, setPreviewEnvelope] = useState<StoredDataEnvelope | null>(null);
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+  const [hasExportedBackup, setHasExportedBackup] = useState(false);
   const [hasAcknowledgedExternalBackup, setHasAcknowledgedExternalBackup] = useState(false);
   const [typedReplaceText, setTypedReplaceText] = useState('');
 
@@ -100,6 +102,7 @@ export default function SettingsScreen() {
 
       showStatusNotice('Backup file ready: choose where to save it.');
       setIsExporting(false);
+      setHasExportedBackup(true); // Unlock replace-all acknowledgement
       return true;
     } catch (err: any) {
       setIsExporting(false);
@@ -107,6 +110,31 @@ export default function SettingsScreen() {
       Alert.alert('Backup Export Failed', msg);
       setErrorMessage(msg);
       return false;
+    }
+  };
+
+  /**
+   * Retry saving recovery copy when storage is locked
+   */
+  const handleRetryRecovery = async () => {
+    const ok = await getStorage().retryRecovery();
+    if (ok) {
+      Alert.alert('Recovery Copy Saved', 'Raw payload was successfully written to recovery storage.');
+    } else {
+      Alert.alert('Retry Failed', 'Unable to write recovery copy to storage. Please use "View / Copy Raw Data" to save it manually.');
+    }
+  };
+
+  /**
+   * Copy raw payload text
+   */
+  const handleCopyRawPayload = () => {
+    const raw = getStorage().getRawCorruptedPayload() || '';
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(raw);
+      Alert.alert('Copied', 'Raw corrupted payload copied to clipboard.');
+    } else {
+      Alert.alert('Notice', 'Please select and copy the text directly from the text box.');
     }
   };
 
@@ -167,8 +195,11 @@ export default function SettingsScreen() {
         return;
       }
 
-      // Valid: open preview modal
+      // Valid: open preview modal and reset replace-all gate
       setPreviewEnvelope(validation.envelope);
+      setHasExportedBackup(false);
+      setHasAcknowledgedExternalBackup(false);
+      setTypedReplaceText('');
     } catch (err: any) {
       setIsImporting(false);
       Alert.alert('Import Error', err?.message || 'Failed to read selected file.');
@@ -189,9 +220,25 @@ export default function SettingsScreen() {
     }
   };
 
+  /** Toggle External Backup Acknowledgement */
+  const handleToggleAcknowledge = () => {
+    if (!hasExportedBackup) {
+      Alert.alert(
+        'Export Required First',
+        'You must click "Download External Backup Now" and export a backup before acknowledging.'
+      );
+      return;
+    }
+    setHasAcknowledgedExternalBackup(!hasAcknowledgedExternalBackup);
+  };
+
   /** Apply Import: Replace All */
   const handleApplyReplaceAll = async () => {
     if (!previewEnvelope) return;
+    if (!hasExportedBackup) {
+      Alert.alert('Action Required', 'Please download an external backup first before proceeding.');
+      return;
+    }
     if (!hasAcknowledgedExternalBackup) {
       Alert.alert('Action Required', 'Please confirm that you have saved an external backup somewhere safe.');
       return;
@@ -208,6 +255,7 @@ export default function SettingsScreen() {
 
       setPreviewEnvelope(null);
       setShowReplaceConfirm(false);
+      setHasExportedBackup(false);
       setHasAcknowledgedExternalBackup(false);
       setTypedReplaceText('');
 
@@ -233,6 +281,20 @@ export default function SettingsScreen() {
           <Text style={[styles.lockSubtitle, { color: themeColors.text }]}>
             {lockReason || 'Storage is locked due to corruption. Writes are blocked to prevent data loss.'}
           </Text>
+          <View style={styles.lockActionsRow}>
+            <TouchableOpacity
+              onPress={() => setShowRawPayloadModal(true)}
+              style={[styles.smallButton, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}
+            >
+              <Text style={[styles.smallButtonText, { color: themeColors.text }]}>View / Copy Raw Data</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleRetryRecovery}
+              style={[styles.smallButton, { backgroundColor: themeColors.primary }]}
+            >
+              <Text style={[styles.smallButtonText, { color: '#FFFFFF' }]}>Retry Saving Recovery Copy</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -319,6 +381,42 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      {/* Raw Payload Modal */}
+      {showRawPayloadModal && (
+        <Modal visible transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Raw Storage Payload</Text>
+              <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
+                Copy this raw data to inspect or recover your entries:
+              </Text>
+
+              <TextInput
+                multiline
+                editable={false}
+                value={getStorage().getRawCorruptedPayload() || 'No in-memory payload found.'}
+                style={[styles.rawTextContainer, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.surfaceSecondary }]}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                <TouchableOpacity
+                  onPress={handleCopyRawPayload}
+                  style={[styles.modalButton, { backgroundColor: themeColors.primary, flex: 1 }]}
+                >
+                  <Text style={styles.modalButtonText}>Copy to Clipboard</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowRawPayloadModal(false)}
+                  style={[styles.cancelButton, { borderColor: themeColors.border, flex: 1 }]}
+                >
+                  <Text style={[styles.cancelButtonText, { color: themeColors.textSecondary }]}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Import Preview Modal */}
       {previewEnvelope && (
         <Modal visible transparent animationType="fade">
@@ -378,35 +476,46 @@ export default function SettingsScreen() {
                     ⚠️ DANGER: Replace-All will erase current data!
                   </Text>
                   <Text style={[styles.safetyText, { color: themeColors.textSecondary }]}>
-                    Before replacing, please export an external backup to a safe place.
+                    You must export a verified external backup before proceeding.
                   </Text>
 
                   <TouchableOpacity
                     onPress={handleExport}
-                    style={[styles.subActionButton, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}
+                    style={[
+                      styles.subActionButton,
+                      {
+                        backgroundColor: hasExportedBackup ? '#059669' : themeColors.surfaceSecondary,
+                        borderColor: hasExportedBackup ? '#059669' : themeColors.border,
+                      },
+                    ]}
                   >
-                    <Text style={[styles.subActionText, { color: themeColors.text }]}>Download External Backup Now</Text>
+                    <Text style={[styles.subActionText, { color: hasExportedBackup ? '#FFFFFF' : themeColors.text }]}>
+                      {hasExportedBackup ? '✓ External Backup Exported' : '1. Download External Backup Now'}
+                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    onPress={() => setHasAcknowledgedExternalBackup(!hasAcknowledgedExternalBackup)}
-                    style={styles.checkboxRow}
+                    onPress={handleToggleAcknowledge}
+                    style={[styles.checkboxRow, { opacity: hasExportedBackup ? 1 : 0.5 }]}
                   >
                     <View
                       style={[
                         styles.checkbox,
-                        { borderColor: themeColors.primary, backgroundColor: hasAcknowledgedExternalBackup ? themeColors.primary : 'transparent' },
+                        {
+                          borderColor: hasExportedBackup ? themeColors.primary : themeColors.border,
+                          backgroundColor: hasAcknowledgedExternalBackup ? themeColors.primary : 'transparent',
+                        },
                       ]}
                     >
                       {hasAcknowledgedExternalBackup && <Text style={styles.checkmark}>✓</Text>}
                     </View>
                     <Text style={[styles.checkboxLabel, { color: themeColors.text }]}>
-                      I have exported and saved a backup file to a safe external location.
+                      2. I have exported and saved a backup file to a safe external location.
                     </Text>
                   </TouchableOpacity>
 
                   <Text style={[styles.inputLabel, { color: themeColors.text }]}>
-                    Type REPLACE in uppercase to confirm:
+                    3. Type REPLACE in uppercase to confirm:
                   </Text>
                   <TextInput
                     value={typedReplaceText}
@@ -423,13 +532,13 @@ export default function SettingsScreen() {
                       styles.modalButton,
                       {
                         backgroundColor:
-                          hasAcknowledgedExternalBackup && typedReplaceText.trim() === 'REPLACE'
+                          hasExportedBackup && hasAcknowledgedExternalBackup && typedReplaceText.trim() === 'REPLACE'
                             ? '#EF4444'
                             : themeColors.border,
                         marginTop: 12,
                       },
                     ]}
-                    disabled={!hasAcknowledgedExternalBackup || typedReplaceText.trim() !== 'REPLACE'}
+                    disabled={!hasExportedBackup || !hasAcknowledgedExternalBackup || typedReplaceText.trim() !== 'REPLACE'}
                   >
                     <Text style={styles.modalButtonText}>Confirm & Replace All Data</Text>
                   </TouchableOpacity>
@@ -437,6 +546,7 @@ export default function SettingsScreen() {
                   <TouchableOpacity
                     onPress={() => {
                       setShowReplaceConfirm(false);
+                      setHasExportedBackup(false);
                       setHasAcknowledgedExternalBackup(false);
                       setTypedReplaceText('');
                     }}
@@ -509,6 +619,31 @@ const styles = StyleSheet.create({
   },
   lockSubtitle: {
     fontSize: 13,
+  },
+  lockActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  smallButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  smallButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rawTextContainer: {
+    height: 140,
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    textAlignVertical: 'top',
   },
   section: {
     padding: 16,

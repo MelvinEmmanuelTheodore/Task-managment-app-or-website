@@ -1,7 +1,7 @@
 # Project Status
 
 **Current Phase:** Phase 1 (Foundation & Setup)  
-**Status:** In Progress — Step B0 (Milestone A Hardening) Plan Submitted on `feat/topics-tasks-timetable`  
+**Status:** In Progress — Step B0 Hardening Revisions Implemented on `feat/topics-tasks-timetable` (Automated Tests Passing; Review & Physical Device Verification Pending)  
 **Last Updated:** 2026-11-07  
 
 ---
@@ -20,13 +20,13 @@
   - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
   - [x] Unit test suite (20 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
-- [x] **Step B0: Milestone A Hardening & Resilience** *(Completed & Audited on branch `feat/topics-tasks-timetable`)*
-  - [x] 1. Write-lock on storage corruption & raw recovery key preservation
-  - [x] 2. Verified export with file existence/size validation and `expo-sharing`
-  - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), required external backup acknowledgement & internal rollback snapshot verification
+- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 38 automated tests pass; Physical Android device verification pending)*
+  - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
+  - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`
+  - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), mandatory external backup export enforcement & internal rollback snapshot verification
   - [x] 4. Storage provider factory (`getStorage()`)
   - [x] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
-  - [x] 6. Consolidated cascade and move logic in storage adapter
+  - [x] 6. Consolidated cascade and move logic in storage adapter returning updated envelope
   - [x] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build *(Postponed to Milestone B)*
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B)*
@@ -47,5 +47,5 @@
 ---
 
 ## 2. Immediate Blockers & Action Items
-1. **User Review Required:** Milestone A is complete and verified with automated unit tests (`npm test` passed) and static web export.
+1. **Review & Verification:** Step B0 revisions implemented. All 38 automated unit tests and web static export pass. Physical Android device verification and approval by User and ChatGPT remain pending before merging into main or starting Milestone B.
 2. **Next Step:** Awaiting user testing and review of `feat/topics-tasks-timetable` before merging into `main`.

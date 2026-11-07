@@ -20,3 +20,4 @@ export function setStorageForTesting(adapter: IStorageAdapter): void {
 }
 
 export { IStorageAdapter, AsyncStorageAdapter, storageAdapter };
+

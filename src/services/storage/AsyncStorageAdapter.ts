@@ -14,11 +14,27 @@ export const STORAGE_KEY = '@time_mgmt_app_data_v1';
 export const RECOVERY_KEY_PREFIX = '@time_mgmt_app_data_recovery_';
 export const PRE_MIGRATION_KEY_PREFIX = '@time_mgmt_pre_migration_v1_';
 export const SNAPSHOT_KEY_PREFIX = '@time_mgmt_internal_rollback_snapshot_';
+export const CURRENT_SCHEMA_VERSION = 1;
+
+export type MigrationStep = (data: any) => any;
+
+/**
+ * Sequential migration functions registry: v1 -> v2, v2 -> v3, etc.
+ */
+export const MIGRATIONS: Record<number, MigrationStep> = {
+  1: (v1Data: StoredDataEnvelope) => {
+    return {
+      ...v1Data,
+      schemaVersion: 2,
+    };
+  },
+};
 
 export class AsyncStorageAdapter implements IStorageAdapter {
   private writeQueue: Promise<void> = Promise.resolve();
   private isLocked = false;
   private corruptionError: string | null = null;
+  private inMemoryRawCorruptedPayload: string | null = null;
 
   isStorageLocked(): boolean {
     return this.isLocked;
@@ -28,19 +44,65 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     return this.corruptionError;
   }
 
+  getRawCorruptedPayload(): string | null {
+    return this.inMemoryRawCorruptedPayload;
+  }
+
+  /**
+   * Retries writing the in-memory raw corrupted payload to the recovery key.
+   * Useful when an earlier recovery-copy write failed due to transient storage errors.
+   */
+  async retryRecovery(): Promise<boolean> {
+    if (!this.inMemoryRawCorruptedPayload) {
+      return false;
+    }
+    try {
+      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
+      await AsyncStorage.setItem(recoveryKey, this.inMemoryRawCorruptedPayload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Emergency / test reset for locked storage */
   clearLock(): void {
     this.isLocked = false;
     this.corruptionError = null;
+    this.inMemoryRawCorruptedPayload = null;
   }
 
   private getInitialData(): StoredDataEnvelope {
     const now = dateToAppTimestamp(new Date());
     return {
-      schemaVersion: 1,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       // Deep copy default collections so module constants are never mutated
       categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
       topics: JSON.parse(JSON.stringify(DEFAULT_TOPICS)),
+      topicTasks: [],
+      timetableBlocks: [],
+      settings: {
+        defaultReminderMinutesBefore: 5,
+        theme: 'dark',
+        wakeUpTime: '08:00',
+        windDownTime: '22:45',
+        batteryOptimizationDismissed: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    };
+  }
+
+  /**
+   * Empty fallback envelope returned when storage is locked.
+   * Prevents presenting seeded defaults as if they were the user's actual data.
+   */
+  private getLockedEmptyData(): StoredDataEnvelope {
+    const now = dateToAppTimestamp(new Date());
+    return {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      categories: [],
+      topics: [],
       topicTasks: [],
       timetableBlocks: [],
       settings: {
@@ -71,13 +133,42 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   /**
+   * Handles corrupted payload or invalid envelope:
+   * - Locks writes.
+   * - Retains raw payload in memory.
+   * - Tries to write a timestamped recovery copy.
+   * - Never overwrites primary storage with defaults.
+   * - Returns locked empty data.
+   */
+  private async handleCorruptedPayload(raw: string, reason: string): Promise<StoredDataEnvelope> {
+    this.isLocked = true;
+    this.corruptionError = reason;
+    this.inMemoryRawCorruptedPayload = raw;
+
+    try {
+      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
+      await AsyncStorage.setItem(recoveryKey, raw);
+    } catch {
+      // If recovery copy write fails, raw is retained in memory.
+      // Primary storage remains intact and locked.
+    }
+
+    return this.getLockedEmptyData();
+  }
+
+  /**
    * Internal reader with corruption detection and recovery key preservation.
-   * If parsing fails or future schema version is encountered:
+   * If parsing fails or envelope structure is invalid:
    * - Preserves raw value to a timestamped recovery key.
    * - Locks writes (isLocked = true).
    * - NEVER overwrites storage with defaults.
+   * - Returns empty locked envelope.
    */
   private async readOrRecover(): Promise<StoredDataEnvelope> {
+    if (this.isLocked) {
+      return this.getLockedEmptyData();
+    }
+
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw === null) {
       // Truly absent key: seed initial defaults
@@ -90,30 +181,32 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     try {
       parsed = JSON.parse(raw);
     } catch (err: any) {
-      this.isLocked = true;
-      this.corruptionError = `Corrupted JSON payload: ${err.message}`;
-
-      // Preserve raw data under recovery key
-      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
-      try {
-        await AsyncStorage.setItem(recoveryKey, raw);
-      } catch {
-        // If recovery copy write fails, original string stays intact under primary key.
-        // Writes remain locked and defaults are NEVER initialized.
-      }
-      return this.getInitialData();
+      return this.handleCorruptedPayload(raw, `Corrupted JSON payload: ${err.message}`);
     }
 
-    if (typeof parsed.schemaVersion !== 'number' || parsed.schemaVersion > 1) {
-      this.isLocked = true;
-      this.corruptionError = `Unknown future schema version: ${parsed.schemaVersion}`;
-      const recoveryKey = `${RECOVERY_KEY_PREFIX}${Date.now()}`;
-      try {
-        await AsyncStorage.setItem(recoveryKey, raw);
-      } catch {
-        // Retain original string intact under primary key
-      }
-      return this.getInitialData();
+    // Handle valid JSON with invalid envelope structure (e.g. null, primitives, arrays)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: payload is not a JSON object');
+    }
+
+    if (typeof parsed.schemaVersion !== 'number') {
+      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing schemaVersion');
+    }
+
+    if (parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
+      return this.handleCorruptedPayload(raw, `Unknown future schema version: ${parsed.schemaVersion}`);
+    }
+
+    // Verify required core entity collections exist
+    if (
+      !Array.isArray(parsed.categories) ||
+      !Array.isArray(parsed.topics) ||
+      !Array.isArray(parsed.topicTasks) ||
+      !Array.isArray(parsed.timetableBlocks) ||
+      typeof parsed.settings !== 'object' ||
+      parsed.settings === null
+    ) {
+      return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing core collections or settings');
     }
 
     // Clean legacy settings.categories if present
@@ -330,6 +423,68 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     // 2. Perform replacement
     await this.saveAll(validation.envelope);
     return validation.envelope;
+  }
+
+  /**
+   * Sequential schema migration mechanism:
+   * 1. Preserves raw payload to a pre-migration timestamped key.
+   * 2. Verifies preservation. If preservation fails, aborts with ZERO modifications to existing data.
+   * 3. Runs sequential migration steps up to targetVersion.
+   * 4. Saves migrated envelope to primary key.
+   */
+  async migrateVersion(targetVersion: number): Promise<StoredDataEnvelope> {
+    return this.enqueueWrite(async () => {
+      if (this.isLocked) {
+        throw new Error(`Cannot run migration: storage is locked (${this.corruptionError})`);
+      }
+
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        throw new Error('Cannot run migration: storage is empty');
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error('Cannot run migration: stored payload is corrupted');
+      }
+
+      if (typeof parsed.schemaVersion !== 'number') {
+        throw new Error('Cannot run migration: missing schemaVersion');
+      }
+
+      if (parsed.schemaVersion >= targetVersion) {
+        return parsed;
+      }
+
+      // Step 1: Pre-migration preservation
+      const preMigrationKey = `${PRE_MIGRATION_KEY_PREFIX}${Date.now()}`;
+      try {
+        await AsyncStorage.setItem(preMigrationKey, raw);
+        const verified = await AsyncStorage.getItem(preMigrationKey);
+        if (!verified || verified !== raw) {
+          throw new Error('Pre-migration preservation verification failed: content mismatch');
+        }
+      } catch (preserveErr: any) {
+        throw new Error(`Migration aborted: pre-migration backup failed (${preserveErr?.message})`);
+      }
+
+      // Step 2: Sequential migrations
+      let currentData = parsed;
+      for (let v = parsed.schemaVersion; v < targetVersion; v++) {
+        const migrator = MIGRATIONS[v];
+        if (!migrator) {
+          throw new Error(`Missing migration step from version ${v} to ${v + 1}`);
+        }
+        currentData = migrator(currentData);
+        currentData.schemaVersion = v + 1;
+      }
+
+      // Step 3: Write migrated data
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
+      return currentData as StoredDataEnvelope;
+    });
   }
 
   async reorderCategories(orderedIds: string[]): Promise<void> {

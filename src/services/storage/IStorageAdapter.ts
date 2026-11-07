@@ -43,7 +43,10 @@ export interface IStorageAdapter {
   // Resilience & Rollback
   isStorageLocked(): boolean;
   getCorruptionError(): string | null;
+  getRawCorruptedPayload(): string | null;
+  retryRecovery(): Promise<boolean>;
   createRollbackSnapshot(): Promise<string>;
+  migrateVersion(targetVersion: number): Promise<StoredDataEnvelope>;
 
   // Atomic Multi-Record Mutations (Transactional Queue)
   mutateEnvelope(mutator: (envelope: StoredDataEnvelope) => void | Promise<void>): Promise<StoredDataEnvelope>;
