@@ -6,6 +6,7 @@ import { TimetableBlock } from '../types/timetable';
 import { storageAdapter } from '../services/storage/AsyncStorageAdapter';
 import { dateToAppTimestamp } from '../utils/dateHelpers';
 import { generateId } from '../utils/idGenerator';
+import { useTimetableStore } from './timetableStore';
 
 interface CategoryTopicState {
   categories: Category[];
@@ -20,6 +21,7 @@ interface CategoryTopicState {
   addCategory: (name: string, priority: Priority, color: string) => Promise<Category>;
   updateCategory: (category: Category) => Promise<void>;
   reorderCategories: (orderedIds: string[]) => Promise<void>;
+  moveCategoryOrder: (categoryId: string, direction: 'up' | 'down') => Promise<void>;
   deleteCategoryCascade: (categoryId: string) => Promise<void>;
   moveCategoryContentsAndDelete: (fromCategoryId: string, toCategoryId: string) => Promise<void>;
 
@@ -28,6 +30,7 @@ interface CategoryTopicState {
   updateTopic: (topic: Topic) => Promise<void>;
   toggleTopicActive: (topicId: string) => Promise<void>;
   reorderTopics: (categoryId: string, orderedIds: string[]) => Promise<void>;
+  moveTopicOrder: (topicId: string, direction: 'up' | 'down') => Promise<void>;
   deleteTopic: (topicId: string) => Promise<void>;
 
   // TopicTask Actions
@@ -107,6 +110,20 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     await storageAdapter.saveAll(envelope);
   },
 
+  moveCategoryOrder: async (categoryId, direction) => {
+    const categories = [...get().categories].sort((a, b) => a.sortOrder - b.sortOrder);
+    const index = categories.findIndex((c) => c.id === categoryId);
+    if (index < 0) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= categories.length) return;
+
+    const [moved] = categories.splice(index, 1);
+    categories.splice(targetIndex, 0, moved);
+
+    const orderedIds = categories.map((c) => c.id);
+    await get().reorderCategories(orderedIds);
+  },
+
   deleteCategoryCascade: async (categoryId) => {
     // Cascades: delete category, all topics under it, and all tasks under those topics
     const { topics, topicTasks, categories } = get();
@@ -121,6 +138,11 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
       topics: updatedTopics,
       topicTasks: updatedTasks,
     });
+
+    // Synchronize in-memory timetable store immediately
+    useTimetableStore.setState((s) => ({
+      blocks: s.blocks.filter((b) => b.categoryId !== categoryId),
+    }));
 
     const envelope = await storageAdapter.loadAll();
     envelope.categories = updatedCategories;
@@ -142,6 +164,13 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const updatedCategories = categories.filter((c) => c.id !== fromCategoryId);
 
     set({ categories: updatedCategories, topics: updatedTopics });
+
+    // Synchronize in-memory timetable store immediately
+    useTimetableStore.setState((s) => ({
+      blocks: s.blocks.map((b) =>
+        b.categoryId === fromCategoryId ? { ...b, categoryId: toCategoryId, updatedAt: now } : b
+      ),
+    }));
 
     const envelope = await storageAdapter.loadAll();
     envelope.categories = updatedCategories;
@@ -202,6 +231,24 @@ export const useCategoryTopicStore = create<CategoryTopicState>((set, get) => ({
     const envelope = await storageAdapter.loadAll();
     envelope.topics = updated;
     await storageAdapter.saveAll(envelope);
+  },
+
+  moveTopicOrder: async (topicId, direction) => {
+    const topic = get().topics.find((t) => t.id === topicId);
+    if (!topic) return;
+    const catTopics = get().topics
+      .filter((t) => t.categoryId === topic.categoryId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const index = catTopics.findIndex((t) => t.id === topicId);
+    if (index < 0) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= catTopics.length) return;
+
+    const [moved] = catTopics.splice(index, 1);
+    catTopics.splice(targetIndex, 0, moved);
+
+    const orderedIds = catTopics.map((t) => t.id);
+    await get().reorderTopics(topic.categoryId, orderedIds);
   },
 
   deleteTopic: async (topicId) => {

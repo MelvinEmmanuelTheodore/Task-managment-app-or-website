@@ -10,10 +10,22 @@ export function dateToAppTimestamp(date: Date): AppTimestamp {
   return {
     seconds,
     nanoseconds,
-    toDate: () => new Date(ms),
-    toMillis: () => ms,
-    toISOString: () => new Date(ms).toISOString(),
   };
+}
+
+/** Convert a serialisable AppTimestamp to a JavaScript Date */
+export function appTimestampToDate(ts: AppTimestamp): Date {
+  return new Date(ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6));
+}
+
+/** Convert a serialisable AppTimestamp to epoch milliseconds */
+export function appTimestampToMillis(ts: AppTimestamp): number {
+  return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
+}
+
+/** Convert a serialisable AppTimestamp to an ISO 8601 string */
+export function appTimestampToISOString(ts: AppTimestamp): string {
+  return appTimestampToDate(ts).toISOString();
 }
 
 /** Get the current calendar day formatted as "YYYY-MM-DD" in IST */
@@ -25,7 +37,7 @@ export function getCurrentISTDate(): string {
 
 /** Format a timestamp or Date for display in 12h IST time with AM/PM */
 export function formatTimeIST(dateOrTimestamp: Date | AppTimestamp): string {
-  const date = 'toDate' in dateOrTimestamp ? dateOrTimestamp.toDate() : dateOrTimestamp;
+  const date = 'seconds' in dateOrTimestamp ? appTimestampToDate(dateOrTimestamp) : dateOrTimestamp;
   return new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
     hour: 'numeric',

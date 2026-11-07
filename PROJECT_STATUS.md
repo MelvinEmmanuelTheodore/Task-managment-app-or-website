@@ -12,13 +12,14 @@
 - [x] Environment Prerequisites Setup (Git & Node.js installed on host system)
 - [x] Local Git Repository Initialized & Synced with Remote (`main` branch on GitHub)
 - [x] Step 1: Expo React Native + TypeScript Project Scaffolding
-- [x] **Milestone A: Interactive Core** (Completed on branch `feat/topics-tasks-timetable`)
-  - [x] Category & Topic Manager (CRUD, priorities, sortOrder, active/deactivate toggle)
-  - [x] Topic Tasks (CRUD under topics, completion toggle, automatic progress calculation)
-  - [x] Dashboard with active topics grouped by category priority
-  - [x] Interactive Daily Timetable (add/edit blocks, shift confirmation dialogs, fixed commitment flags)
-  - [x] Local Persistence (`AsyncStorageAdapter` with serialized write queue, theme persistence, and JSON backup export)
-  - [x] Unit test suite (storage CRUD, category cascade rules, topic progress calculation)
+- [x] **Milestone A: Interactive Core** (Completed & Audited on branch `feat/topics-tasks-timetable`)
+  - [x] Category & Topic Manager (Full CRUD, priority editing, sortOrder reordering, active/deactivate toggle)
+  - [x] Safe Category Deletion & Dependency Migration (accurate counts, cascade delete or move to another category)
+  - [x] Topic Tasks (Full CRUD, title, priority, due date, notes editing, completion toggle, progress calculation)
+  - [x] Dashboard with active topics grouped by category priority with pure presentational cards
+  - [x] Interactive Daily Timetable (validation for HH:mm & 5-480m duration, date changes, shift confirmation dialogs, fixed commitment flags)
+  - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
+  - [x] Unit test suite (19 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`)
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build *(Postponed to Milestone B)*
 - [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B)*
 - [ ] Step 4: Data Layer & Offline Sync

@@ -10,7 +10,8 @@ This document tracks technical proposals, architectural reviews, open questions,
 |---|---|---|---|---|
 | **REV-005** | Exact Alarm Verification (`delivery: 'alarmClock'`) on physical device | Claude & ChatGPT | **Pending Step 3.5 Test** | Requires physical device testing on Android 13/14+ to verify wake behavior. Fallback: Notifee if `expo-notifications` fails. |
 | **REV-006** | Phase 5 Serverless Cost & Backend Architecture | Claude | **Open (Deferred to Phase 5)** | Retained as UNDECIDED. We will evaluate free-tier alternatives before considering paid Cloud Functions. Keys must never appear in frontend code. |
-| **REV-015** | Milestone A Entity Separation & Local Storage Architecture | User / Antigravity | **Proposed (Milestone A Review)** | Evaluates 4 separate entities (`Category`, `Topic`, `TopicTask`, `TimetableBlock`), `AsyncStorageAdapter` serialized queue, and cascade delete safeguards. |
+| **REV-015** | Milestone A Entity Separation & Local Storage Architecture | User / Antigravity | **Resolved in Milestone A** | Implemented 4 entities (`Category`, `Topic`, `TopicTask`, `TimetableBlock`), transactional `AsyncStorageAdapter`, cascade delete/move safeguards, and pure serialisable `AppTimestamp`. |
+| **REV-016** | ChatGPT Milestone A Audit Gaps (Editing, Theme, Serialisation, Concurrency, Deletion, Validation) | ChatGPT | **Resolved** | Implemented category/topic/task full editing and reordering, theme storage persistence, pure `AppTimestamp` (`{ seconds, nanoseconds }`), transactional `mutateEnvelope`, dual-option category deletion dialog, timetable `HH:mm` and duration validators, and 11 new tests in `milestoneA.test.ts` (19 tests total passing). |
 
 ---
 

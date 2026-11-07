@@ -61,7 +61,7 @@ flowchart TD
 
 ### Data Abstraction Interface & Serialisable Timestamp Type
 To ensure complete type compatibility across both SDKs without build errors:
-- **Serialisable Domain Timestamp:** The shared types do NOT import `Timestamp` directly from `firebase/firestore` or `@react-native-firebase/firestore`. Instead, domain models use an agnostic, JSON-serialisable interface `AppTimestamp` with standard seconds/nanoseconds representations and helper conversion methods (`toDate()`, `toMillis()`, `toISOString()`).
+- **Serialisable Domain Timestamp:** The shared types do NOT import `Timestamp` directly from `firebase/firestore` or `@react-native-firebase/firestore`. Instead, domain models use a pure, JSON-serialisable interface `AppTimestamp` containing only `{ seconds: number; nanoseconds: number }`. Date/epoch/ISO conversions are handled via pure utility functions (`dateToAppTimestamp`, `appTimestampToDate`, `appTimestampToMillis`, `appTimestampToISOString`).
 - Platform adapters (`firestore.native.ts` and `firestore.web.ts`) handle bidirectionally mapping their respective native SDK `Timestamp` objects to and from the domain `AppTimestamp`.
 
 ---
@@ -94,13 +94,10 @@ export type TaskPriority = 'high' | 'medium' | 'low';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
 
-/** Platform-independent, JSON-serialisable Timestamp interface compatible with both Web and Native Firebase SDKs */
+/** Platform-independent, JSON-serialisable Timestamp representation compatible with both Web and Native Firebase SDKs */
 export interface AppTimestamp {
   seconds: number;
   nanoseconds: number;
-  toDate(): Date;
-  toMillis(): number;
-  toISOString(): string;
 }
 
 export interface ActualTimeEntry {

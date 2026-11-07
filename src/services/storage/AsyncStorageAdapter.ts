@@ -45,6 +45,32 @@ export class AsyncStorageAdapter implements IStorageAdapter {
     });
   }
 
+  /** Transactional mutation: queues read-modify-write sequentially to prevent lost updates */
+  private async mutateEnvelope(
+    mutator: (envelope: StoredDataEnvelope) => void | Promise<void>
+  ): Promise<StoredDataEnvelope> {
+    return this.enqueueWrite(async () => {
+      let data: StoredDataEnvelope;
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        data = this.getInitialData();
+      } else {
+        try {
+          data = JSON.parse(raw);
+          if (data.schemaVersion !== 1) {
+            data = this.getInitialData();
+          }
+        } catch {
+          data = this.getInitialData();
+        }
+      }
+
+      await mutator(data);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      return data;
+    });
+  }
+
   async loadAll(): Promise<StoredDataEnvelope> {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -55,8 +81,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       }
       const parsed: StoredDataEnvelope = JSON.parse(raw);
       if (parsed.schemaVersion !== 1) {
-        // Future migrations can be handled here
-        return parsed;
+        return this.getInitialData();
       }
       return parsed;
     } catch {
@@ -76,20 +101,20 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async saveCategory(category: Category): Promise<void> {
-    const data = await this.loadAll();
-    const index = data.categories.findIndex((c) => c.id === category.id);
-    if (index >= 0) {
-      data.categories[index] = category;
-    } else {
-      data.categories.push(category);
-    }
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      const index = data.categories.findIndex((c) => c.id === category.id);
+      if (index >= 0) {
+        data.categories[index] = category;
+      } else {
+        data.categories.push(category);
+      }
+    });
   }
 
   async deleteCategory(categoryId: string): Promise<void> {
-    const data = await this.loadAll();
-    data.categories = data.categories.filter((c) => c.id !== categoryId);
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      data.categories = data.categories.filter((c) => c.id !== categoryId);
+    });
   }
 
   async getTopics(): Promise<Topic[]> {
@@ -98,21 +123,21 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async saveTopic(topic: Topic): Promise<void> {
-    const data = await this.loadAll();
-    const index = data.topics.findIndex((t) => t.id === topic.id);
-    if (index >= 0) {
-      data.topics[index] = topic;
-    } else {
-      data.topics.push(topic);
-    }
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      const index = data.topics.findIndex((t) => t.id === topic.id);
+      if (index >= 0) {
+        data.topics[index] = topic;
+      } else {
+        data.topics.push(topic);
+      }
+    });
   }
 
   async deleteTopic(topicId: string): Promise<void> {
-    const data = await this.loadAll();
-    data.topics = data.topics.filter((t) => t.id !== topicId);
-    data.topicTasks = data.topicTasks.filter((task) => task.topicId !== topicId);
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      data.topics = data.topics.filter((t) => t.id !== topicId);
+      data.topicTasks = data.topicTasks.filter((task) => task.topicId !== topicId);
+    });
   }
 
   async getTopicTasks(): Promise<TopicTask[]> {
@@ -121,20 +146,20 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async saveTopicTask(task: TopicTask): Promise<void> {
-    const data = await this.loadAll();
-    const index = data.topicTasks.findIndex((t) => t.id === task.id);
-    if (index >= 0) {
-      data.topicTasks[index] = task;
-    } else {
-      data.topicTasks.push(task);
-    }
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      const index = data.topicTasks.findIndex((t) => t.id === task.id);
+      if (index >= 0) {
+        data.topicTasks[index] = task;
+      } else {
+        data.topicTasks.push(task);
+      }
+    });
   }
 
   async deleteTopicTask(taskId: string): Promise<void> {
-    const data = await this.loadAll();
-    data.topicTasks = data.topicTasks.filter((t) => t.id !== taskId);
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      data.topicTasks = data.topicTasks.filter((t) => t.id !== taskId);
+    });
   }
 
   async getTimetableBlocks(): Promise<TimetableBlock[]> {
@@ -143,20 +168,20 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async saveTimetableBlock(block: TimetableBlock): Promise<void> {
-    const data = await this.loadAll();
-    const index = data.timetableBlocks.findIndex((b) => b.id === block.id);
-    if (index >= 0) {
-      data.timetableBlocks[index] = block;
-    } else {
-      data.timetableBlocks.push(block);
-    }
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      const index = data.timetableBlocks.findIndex((b) => b.id === block.id);
+      if (index >= 0) {
+        data.timetableBlocks[index] = block;
+      } else {
+        data.timetableBlocks.push(block);
+      }
+    });
   }
 
   async deleteTimetableBlock(blockId: string): Promise<void> {
-    const data = await this.loadAll();
-    data.timetableBlocks = data.timetableBlocks.filter((b) => b.id !== blockId);
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      data.timetableBlocks = data.timetableBlocks.filter((b) => b.id !== blockId);
+    });
   }
 
   async getSettings(): Promise<UserSettings> {
@@ -165,9 +190,9 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   }
 
   async saveSettings(settings: UserSettings): Promise<void> {
-    const data = await this.loadAll();
-    data.settings = settings;
-    await this.saveAll(data);
+    await this.mutateEnvelope((data) => {
+      data.settings = settings;
+    });
   }
 
   async exportAllData(): Promise<string> {

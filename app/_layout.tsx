@@ -1,12 +1,17 @@
+import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useAppTheme } from '../src/stores/themeStore';
+import { useAppTheme, useThemeStore } from '../src/stores/themeStore';
 import { Colors } from '../src/constants/colors';
 
 export default function RootLayout() {
   const { isDark, theme } = useAppTheme();
   const themeColors = Colors[theme];
+
+  useEffect(() => {
+    useThemeStore.getState().initTheme();
+  }, []);
 
   return (
     <SafeAreaProvider>

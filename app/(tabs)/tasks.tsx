@@ -16,6 +16,7 @@ import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { TimetableBlock } from '../../src/types/timetable';
 import { Priority } from '../../src/types/category';
 import { formatDateIST } from '../../src/utils/dateHelpers';
+import { validateStartTime, validateDurationMin, validateDate } from '../../src/utils/timetableValidators';
 
 export default function TimetableScreen() {
   const { theme } = useAppTheme();
@@ -32,10 +33,12 @@ export default function TimetableScreen() {
   const [title, setTitle] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
+  const [blockDate, setBlockDate] = useState(selectedDate);
   const [startTime, setStartTime] = useState('09:00');
   const [durationMin, setDurationMin] = useState('60');
   const [isFixed, setIsFixed] = useState(false);
   const [notes, setNotes] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Delete & Confirmation state
   const [blockToDelete, setBlockToDelete] = useState<TimetableBlock | null>(null);
@@ -53,11 +56,13 @@ export default function TimetableScreen() {
     setTitle('');
     setCategoryId(categories[0]?.id || '');
     setPriority('medium');
+    setBlockDate(selectedDate);
     setStartTime('09:00');
     setDurationMin('60');
     setIsFixed(false);
     setNotes('');
     setEditingBlock(null);
+    setFormError(null);
     setShowAddForm(false);
   };
 
@@ -66,32 +71,59 @@ export default function TimetableScreen() {
     setTitle(b.title);
     setCategoryId(b.categoryId);
     setPriority(b.priority);
+    setBlockDate(b.date);
     setStartTime(b.startTime);
     setDurationMin(b.durationMin.toString());
     setIsFixed(b.isFixed);
     setNotes(b.notes || '');
+    setFormError(null);
     setShowAddForm(true);
   };
 
   const handleSaveBlock = async () => {
-    if (!title.trim() || !categoryId) return;
-    const dur = parseInt(durationMin, 10) || 60;
+    setFormError(null);
+    if (!title.trim()) {
+      setFormError('Block title cannot be empty.');
+      return;
+    }
+    if (!categoryId) {
+      setFormError('Please select a category.');
+      return;
+    }
+    if (!validateDate(blockDate)) {
+      setFormError('Target date must be formatted as YYYY-MM-DD (e.g. 2026-11-20).');
+      return;
+    }
+    if (!validateStartTime(startTime)) {
+      setFormError('Start time must be in HH:mm 24-hour format (e.g. 09:30 or 14:00).');
+      return;
+    }
+    const dur = parseInt(durationMin, 10);
+    if (!validateDurationMin(dur)) {
+      setFormError('Duration must be an integer between 5 and 480 minutes.');
+      return;
+    }
 
     if (editingBlock) {
-      // Check if time or duration was altered
-      const isTimeChanged = editingBlock.startTime !== startTime || editingBlock.durationMin !== dur;
+      // Check if date, time or duration was altered
+      const isScheduleChanged =
+        editingBlock.startTime !== startTime.trim() ||
+        editingBlock.durationMin !== dur ||
+        editingBlock.date !== blockDate.trim();
+
       const updated: TimetableBlock = {
         ...editingBlock,
         title: title.trim(),
         categoryId,
         priority,
-        startTime,
+        date: blockDate.trim(),
+        startTime: startTime.trim(),
         durationMin: dur,
         isFixed,
-        notes,
+        notes: notes.trim(),
       };
 
-      if (isTimeChanged) {
+      if (isScheduleChanged) {
         // Enforce Decision 007: NEVER move or reschedule without explicit confirmation
         setPendingBlockUpdate(updated);
         setShowRescheduleConfirm(true);
@@ -104,10 +136,11 @@ export default function TimetableScreen() {
         title: title.trim(),
         categoryId,
         priority,
-        startTime,
+        date: blockDate.trim(),
+        startTime: startTime.trim(),
         durationMin: dur,
         isFixed,
-        notes,
+        notes: notes.trim(),
       });
       resetForm();
     }
@@ -140,12 +173,28 @@ export default function TimetableScreen() {
             {editingBlock ? 'Edit Timetable Block' : 'New Timetable Block'}
           </Text>
 
+          {formError && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{formError}</Text>
+            </View>
+          )}
+
           <TextInput
             style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
             placeholder="Block Title (e.g. Morning SolidWorks Practice)"
             placeholderTextColor={themeColors.textMuted}
             value={title}
             onChangeText={setTitle}
+          />
+
+          {/* Date Picker / Input */}
+          <Text style={[styles.label, { color: themeColors.textSecondary }]}>Target Date (YYYY-MM-DD):</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={themeColors.textMuted}
+            value={blockDate}
+            onChangeText={setBlockDate}
           />
 
           {/* Category Picker */}
@@ -183,7 +232,7 @@ export default function TimetableScreen() {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.label, { color: themeColors.textSecondary }]}>Duration (Mins):</Text>
+              <Text style={[styles.label, { color: themeColors.textSecondary }]}>Duration (5-480 Mins):</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
                 placeholder="60"
@@ -203,6 +252,16 @@ export default function TimetableScreen() {
             </View>
             <Switch value={isFixed} onValueChange={setIsFixed} />
           </View>
+
+          {/* Optional Notes */}
+          <Text style={[styles.label, { color: themeColors.textSecondary }]}>Notes (Optional):</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+            placeholder="Additional context or goals..."
+            placeholderTextColor={themeColors.textMuted}
+            value={notes}
+            onChangeText={setNotes}
+          />
 
           {/* Actions */}
           <View style={styles.formActions}>
@@ -300,13 +359,13 @@ export default function TimetableScreen() {
       {/* Reschedule Confirmation Modal (Enforcing Decision 007) */}
       <ConfirmModal
         visible={showRescheduleConfirm}
-        title="Confirm Timetable Shift"
+        title="Confirm Schedule Shift"
         message={
-          pendingBlockUpdate
-            ? `Moving "${pendingBlockUpdate.title}" to ${pendingBlockUpdate.startTime} (${pendingBlockUpdate.durationMin} mins).\n\nDo you confirm this schedule update?`
+          pendingBlockUpdate && editingBlock
+            ? `Rescheduling "${pendingBlockUpdate.title}":\n\nFrom: ${editingBlock.date} at ${editingBlock.startTime} (${editingBlock.durationMin}m)\nTo: ${pendingBlockUpdate.date} at ${pendingBlockUpdate.startTime} (${pendingBlockUpdate.durationMin}m)\n\nFixed status: ${pendingBlockUpdate.isFixed ? 'Fixed Commitment' : 'Flexible'}\n\nNote: No other timetable blocks will be automatically moved.`
             : ''
         }
-        confirmText="Confirm Move"
+        confirmText="Confirm Reschedule"
         onConfirm={async () => {
           if (pendingBlockUpdate) {
             await updateBlock(pendingBlockUpdate);
@@ -325,6 +384,19 @@ export default function TimetableScreen() {
 }
 
 const styles = StyleSheet.create({
+  errorBanner: {
+    backgroundColor: '#EF444422',
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  errorBannerText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   container: {
     flex: 1,
     padding: 16,

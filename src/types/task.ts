@@ -2,13 +2,10 @@ export type TaskPriority = 'high' | 'medium' | 'low';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
 
-/** Platform-independent, JSON-serialisable Timestamp interface */
+/** Platform-independent, JSON-serialisable Timestamp representation */
 export interface AppTimestamp {
   seconds: number;
   nanoseconds: number;
-  toDate(): Date;
-  toMillis(): number;
-  toISOString(): string;
 }
 
 export interface ActualTimeEntry {
