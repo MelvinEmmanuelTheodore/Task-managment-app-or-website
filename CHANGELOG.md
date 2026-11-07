@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Initial Week 1 Timetable Population & Routine Behaviour (`feat/topics-tasks-timetable`):**
+  - **Week 1 - Initial Productivity Routine (Monday 9 Nov – Friday 13 Nov 2026):** Populated the user's authentic first-week schedule with 85 timetable blocks (17 contiguous daily blocks from 08:00 wake-up to 22:45 sleep preparation). Built-in essential fixed commitments, high-priority career and technical learning blocks, medium-priority language and review blocks, and flexible breaks/buffer slots.
+  - **Weekday-Specific Activity Customisations:**
+    - *Monday, 9 Nov:* Overseas research on target countries (12:15), SolidWorks practice (14:00), Candidex application records tracking (16:00).
+    - *Tuesday, 10 Nov:* Automotive employers research (12:15), ANSYS introduction and FEA (14:00), German practice and communication (21:00).
+    - *Wednesday, 11 Nov:* Suitable overseas applications (12:15), SolidWorks modelling (14:00), Practising automotive project explanation aloud (16:00).
+    - *Thursday, 12 Nov:* Visa and job eligibility requirements (12:15), ANSYS practice (14:00), Portfolio improvement (16:00).
+    - *Friday, 13 Nov:* Applications and follow-ups (12:15), SolidWorks project (14:00), Weekly progress review (16:00).
+    - *Daily Constant:* Consistent 20:00–21:00 LEGO McLaren P1 build every weekday evening.
+  - **Schedule Independence & Behavioural Safety:** Individual blocks are independently editable without affecting other days; completed/skipped status changes remain isolated without cascading missed activities; supports manual rescheduling and cancellation; preserves unaffected tasks; respects priority overrides; strictly non-repeating into subsequent weeks.
+  - **Routine Navigation & UI Shortcuts:** Added quick "Week 1" navigation shortcuts in daily and weekly views, routine identity badge ("Week 1 - Initial Productivity Routine"), and empty-state routine restoration action.
+  - **Comprehensive Test Suite Expansion:** Added dedicated routine verification tests in `src/__tests__/timetable.test.ts` asserting full 85-block generation, daily 885-minute planned time, weekday activity variations, independent editing, non-cascading status preservation, and real-time conflict detection (83 total unit tests passing across 5 suites).
+
 - **Core Timetable Implementation & Validation Hardening (`feat/topics-tasks-timetable`):**
   - **Daily & Weekly Views:** Implemented interactive daily view with date strip navigation and quick shift buttons (Today/Tomorrow), and weekly view with 7-day schedule, summary metrics (planned time, total blocks, completed blocks), and day breakdown.
   - **Category, Topic & Task Integration:** Timetable blocks seamlessly link to existing categories, active topics, and specific topic tasks without duplicating category/topic data systems.

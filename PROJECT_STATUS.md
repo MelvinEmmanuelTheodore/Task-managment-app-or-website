@@ -18,8 +18,9 @@
   - [x] Topic Tasks (Full CRUD, title, priority, due date, notes editing, completion toggle, progress calculation)
   - [x] Dashboard with active topics grouped by category priority with pure presentational cards
   - [x] Interactive Daily & Weekly Timetable (Daily view with day-strip navigation, Weekly view with 7-day schedule & metrics, live conflict/overlap detection, topic & task linkages, completion status toggles [pending/completed/skipped], quick reschedule, strict start/end/duration synchronization and validation, explicit overnight block prevention, and local persistence)
+  - [x] Populated "Week 1 - Initial Productivity Routine" (Monday 9 Nov – Friday 13 Nov 2026; 85 blocks; 17 blocks/day from 08:00 wake-up to 22:45 sleep prep; weekday variations for SolidWorks, ANSYS, Candidex, German, and constant LEGO McLaren P1; non-repeating)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
-  - [x] Unit test suite (77 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `timetable.test.ts`)
+  - [x] Unit test suite (83 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `timetable.test.ts`)
 - [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Remaining `migrateVersion()` validation issue recorded as DEFERRED / KNOWN ISSUE REV-018; Step B0 remains unmerged into `main`)*
   - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
   - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`

@@ -48,6 +48,7 @@ export default function TimetableScreen() {
     viewMode,
     setViewMode,
     loadInitialBlocks,
+    populateWeek1Routine,
     addBlock,
     updateBlock,
     deleteBlock,
@@ -418,10 +419,22 @@ export default function TimetableScreen() {
                 <Text style={[styles.todayBtnText, { color: themeColors.primary }]}>Today</Text>
               </TouchableOpacity>
 
+              <TouchableOpacity
+                onPress={() => setSelectedDate('2026-11-09')}
+                style={[styles.todayBtn, { backgroundColor: selectedDate >= '2026-11-09' && selectedDate <= '2026-11-13' ? themeColors.primary : themeColors.surfaceSecondary }]}
+              >
+                <Text style={[styles.todayBtnText, { color: selectedDate >= '2026-11-09' && selectedDate <= '2026-11-13' ? '#FFF' : themeColors.primary }]}>Week 1</Text>
+              </TouchableOpacity>
+
               <View style={styles.dateDisplay}>
                 <Text style={[styles.dateTitle, { color: themeColors.text }]}>
                   {formatDateIST(selectedDate)}
                 </Text>
+                {selectedDate >= '2026-11-09' && selectedDate <= '2026-11-13' && (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>
+                    Week 1 - Initial Productivity Routine
+                  </Text>
+                )}
                 {selectedDate === getCurrentISTDate() && (
                   <Text style={[styles.todayBadge, { color: themeColors.primary }]}>● Today</Text>
                 )}
@@ -721,6 +734,16 @@ export default function TimetableScreen() {
                     ? 'No blocks scheduled for this date. Tap above to plan your day.'
                     : `No ${statusFilter} blocks found on this date.`}
                 </Text>
+                {blocks.length === 0 && (
+                  <TouchableOpacity
+                    onPress={populateWeek1Routine}
+                    style={[styles.smallAddBtn, { backgroundColor: themeColors.primary, marginTop: 12, paddingHorizontal: 16 }]}
+                  >
+                    <Text style={{ color: '#FFF', fontSize: 13, fontWeight: '700' }}>
+                      Load Week 1 Routine (Nov 9 - 13)
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -746,11 +769,23 @@ export default function TimetableScreen() {
                 onPress={() => setSelectedDate(getCurrentISTDate())}
                 style={[styles.todayBtn, { backgroundColor: themeColors.surfaceSecondary }]}
               >
-                <Text style={[styles.todayBtnText, { color: themeColors.primary }]}>Current Week</Text>
+                <Text style={[styles.todayBtnText, { color: themeColors.primary }]}>Current</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setSelectedDate('2026-11-09')}
+                style={[styles.todayBtn, { backgroundColor: weekStart === '2026-11-09' ? themeColors.primary : themeColors.surfaceSecondary }]}
+              >
+                <Text style={[styles.todayBtnText, { color: weekStart === '2026-11-09' ? '#FFF' : themeColors.primary }]}>Week 1</Text>
               </TouchableOpacity>
 
               <View style={styles.dateDisplay}>
                 <Text style={[styles.dateTitle, { color: themeColors.text }]}>{weekRangeLabel}</Text>
+                {weekStart === '2026-11-09' && (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>
+                    Week 1 Routine (Nov 9 – 13)
+                  </Text>
+                )}
               </View>
 
               <TouchableOpacity

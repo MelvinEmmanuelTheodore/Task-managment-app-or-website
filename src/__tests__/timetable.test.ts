@@ -337,13 +337,14 @@ describe('Timetable Core Functionality Suite', () => {
       const topic = await catStore.addTopic(category.id, 'Algorithms');
       const task = await catStore.addTask(topic.id, 'Dynamic Programming practice');
 
+      // Use 2026-11-16 (unpopulated subsequent week) for clean isolated CRUD assertions
       const block = await timeStore.addBlock({
         title: 'Morning DP Study',
         categoryId: category.id,
         topicId: topic.id,
         taskId: task.id,
         priority: 'high',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '09:00',
         durationMin: 90,
         isFixed: true,
@@ -360,7 +361,7 @@ describe('Timetable Core Functionality Suite', () => {
       expect(block.status).toBe('pending');
 
       // Verify in-memory query
-      const dayBlocks = timeStore.getBlocksForDate('2026-11-09');
+      const dayBlocks = timeStore.getBlocksForDate('2026-11-16');
       expect(dayBlocks.length).toBe(1);
       expect(dayBlocks[0].id).toBe(block.id);
     });
@@ -374,7 +375,7 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Workout',
         categoryId: category.id,
         priority: 'medium',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '07:00',
         durationMin: 45,
       });
@@ -403,22 +404,22 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Read Book Chapter',
         categoryId: category.id,
         priority: 'low',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '21:00',
         durationMin: 30,
       });
 
       // Reschedule to tomorrow at 20:00
-      await timeStore.rescheduleBlock(block.id, '2026-11-10', '20:00', 45);
+      await timeStore.rescheduleBlock(block.id, '2026-11-17', '20:00', 45);
 
       const updated = useTimetableStore.getState().blocks.find((b) => b.id === block.id);
-      expect(updated?.date).toBe('2026-11-10');
+      expect(updated?.date).toBe('2026-11-17');
       expect(updated?.startTime).toBe('20:00');
       expect(updated?.durationMin).toBe(45);
 
       // Verify queries for old and new dates
-      expect(timeStore.getBlocksForDate('2026-11-09').length).toBe(0);
-      expect(timeStore.getBlocksForDate('2026-11-10').length).toBe(1);
+      expect(timeStore.getBlocksForDate('2026-11-16').length).toBe(0);
+      expect(timeStore.getBlocksForDate('2026-11-17').length).toBe(1);
     });
 
     it('queries blocks across a weekly date range sorted by date and startTime', async () => {
@@ -431,7 +432,7 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Wednesday Work',
         categoryId: cat.id,
         priority: 'high',
-        date: '2026-11-11',
+        date: '2026-11-18',
         startTime: '10:00',
         durationMin: 60,
       });
@@ -440,7 +441,7 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Monday Morning',
         categoryId: cat.id,
         priority: 'high',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '08:00',
         durationMin: 60,
       });
@@ -449,12 +450,12 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Monday Afternoon',
         categoryId: cat.id,
         priority: 'medium',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '14:00',
         durationMin: 60,
       });
 
-      const rangeBlocks = timeStore.getBlocksForDateRange('2026-11-09', '2026-11-15');
+      const rangeBlocks = timeStore.getBlocksForDateRange('2026-11-16', '2026-11-22');
       expect(rangeBlocks.length).toBe(3);
       // Sorted chronologically: Monday 08:00, Monday 14:00, Wednesday 10:00
       expect(rangeBlocks[0].title).toBe('Monday Morning');
@@ -471,15 +472,15 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Temp Event',
         categoryId: cat.id,
         priority: 'low',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '12:00',
         durationMin: 30,
       });
 
-      expect(timeStore.getBlocksForDate('2026-11-09').length).toBe(1);
+      expect(timeStore.getBlocksForDate('2026-11-16').length).toBe(1);
 
       await timeStore.deleteBlock(block.id);
-      expect(timeStore.getBlocksForDate('2026-11-09').length).toBe(0);
+      expect(timeStore.getBlocksForDate('2026-11-16').length).toBe(0);
     });
 
     it('persists timetable blocks to storage and survives store reload', async () => {
@@ -491,7 +492,7 @@ describe('Timetable Core Functionality Suite', () => {
         title: 'Persistent Block',
         categoryId: cat.id,
         priority: 'high',
-        date: '2026-11-09',
+        date: '2026-11-16',
         startTime: '11:00',
         durationMin: 60,
         notes: 'Must survive restart',
@@ -515,6 +516,189 @@ describe('Timetable Core Functionality Suite', () => {
       expect(reloaded).toBeDefined();
       expect(reloaded?.title).toBe('Persistent Block');
       expect(reloaded?.status).toBe('completed');
+    });
+  });
+
+  // 5. Week 1 - Initial Productivity Routine Verification
+  describe('5. Week 1 - Initial Productivity Routine Verification', () => {
+    it('populates initial Week 1 schedule with 85 blocks across Monday 9 Nov to Friday 13 Nov', () => {
+      const timeStore = useTimetableStore.getState();
+      const weekDates = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'];
+
+      // 17 blocks per day across 5 days = 85 blocks
+      for (const d of weekDates) {
+        const dayBlocks = timeStore.getBlocksForDate(d);
+        expect(dayBlocks.length).toBe(17);
+
+        // Daily total planned time: 885 minutes (14 hours 45 minutes)
+        const totalMinutes = dayBlocks.reduce((sum, b) => sum + b.durationMin, 0);
+        expect(totalMinutes).toBe(885);
+
+        // Earliest start: 08:00 (Wake time)
+        expect(dayBlocks[0].startTime).toBe('08:00');
+        expect(dayBlocks[0].title).toBe('Wake up, breakfast and preparation');
+        expect(dayBlocks[0].isFixed).toBe(true);
+
+        // Latest activity end: 22:45 (Sleep time)
+        const lastBlock = dayBlocks[dayBlocks.length - 1];
+        expect(lastBlock.startTime).toBe('22:30');
+        expect(lastBlock.durationMin).toBe(15);
+        expect(calculateEndTime(lastBlock.startTime, lastBlock.durationMin)).toBe('22:45');
+        expect(lastBlock.title).toBe('Prepare for tomorrow');
+      }
+
+      // Check weekly query across Nov 9 to Nov 15
+      const weekBlocks = timeStore.getBlocksForDateRange('2026-11-09', '2026-11-15');
+      expect(weekBlocks.length).toBe(85);
+    });
+
+    it('verifies weekday-specific activities across Monday to Friday', () => {
+      const timeStore = useTimetableStore.getState();
+
+      // Monday, 9 November: Target countries, SolidWorks practice, Candidex records
+      const monBlocks = timeStore.getBlocksForDate('2026-11-09');
+      const monOverseas = monBlocks.find((b) => b.startTime === '12:15');
+      expect(monOverseas?.notes).toContain('Identify one or two target countries');
+      const monTech = monBlocks.find((b) => b.startTime === '14:00');
+      expect(monTech?.title).toContain('SolidWorks practice');
+      expect(monTech?.notes).toContain('SolidWorks practice');
+      const monLater = monBlocks.find((b) => b.startTime === '16:00');
+      expect(monLater?.notes).toContain('Update application records in Candidex');
+
+      // Tuesday, 10 November: Automotive employers, ANSYS intro & FEA, German practice & communication
+      const tueBlocks = timeStore.getBlocksForDate('2026-11-10');
+      const tueOverseas = tueBlocks.find((b) => b.startTime === '12:15');
+      expect(tueOverseas?.notes).toContain('Research automotive employers');
+      const tueTech = tueBlocks.find((b) => b.startTime === '14:00');
+      expect(tueTech?.title).toContain('ANSYS intro');
+      expect(tueTech?.notes).toContain('ANSYS introduction and FEA');
+      const tueNight = tueBlocks.find((b) => b.startTime === '21:00');
+      expect(tueNight?.title).toContain('German practice and communication');
+      expect(tueNight?.notes).toContain('German practice and communication');
+
+      // Wednesday, 11 November: Suitable overseas applications, SolidWorks modelling, Explaining automotive project aloud
+      const wedBlocks = timeStore.getBlocksForDate('2026-11-11');
+      const wedOverseas = wedBlocks.find((b) => b.startTime === '12:15');
+      expect(wedOverseas?.notes).toContain('Suitable overseas applications');
+      const wedTech = wedBlocks.find((b) => b.startTime === '14:00');
+      expect(wedTech?.title).toContain('SolidWorks modelling');
+      const wedLater = wedBlocks.find((b) => b.startTime === '16:00');
+      expect(wedLater?.notes).toContain('Practise explaining an automotive project aloud');
+
+      // Thursday, 12 November: Visa & eligibility, ANSYS practice, Portfolio improvement
+      const thuBlocks = timeStore.getBlocksForDate('2026-11-12');
+      const thuOverseas = thuBlocks.find((b) => b.startTime === '12:15');
+      expect(thuOverseas?.notes).toContain('Visa and job eligibility requirements');
+      const thuTech = thuBlocks.find((b) => b.startTime === '14:00');
+      expect(thuTech?.title).toContain('ANSYS practice');
+      const thuLater = thuBlocks.find((b) => b.startTime === '16:00');
+      expect(thuLater?.title).toContain('Portfolio improvement');
+
+      // Friday, 13 November: Applications and follow-ups, SolidWorks project, Weekly progress review
+      const friBlocks = timeStore.getBlocksForDate('2026-11-13');
+      const friOverseas = friBlocks.find((b) => b.startTime === '12:15');
+      expect(friOverseas?.notes).toContain('Applications and follow-ups');
+      const friTech = friBlocks.find((b) => b.startTime === '14:00');
+      expect(friTech?.title).toContain('SolidWorks project');
+      const friLater = friBlocks.find((b) => b.startTime === '16:00');
+      expect(friLater?.title).toContain('Weekly progress review');
+
+      // Daily constant: 20:00–21:00 LEGO block remains identical across all 5 weekdays
+      for (const d of ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']) {
+        const lego = timeStore.getBlocksForDate(d).find((b) => b.startTime === '20:00');
+        expect(lego?.title).toBe('LEGO McLaren P1');
+        expect(lego?.durationMin).toBe(60);
+      }
+    });
+
+    it('allows editing individual blocks without affecting other days', async () => {
+      const timeStore = useTimetableStore.getState();
+
+      const monTech = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '14:00')!;
+      expect(monTech.title).toContain('SolidWorks practice');
+
+      // Edit Monday technical block
+      await timeStore.updateBlock({
+        ...monTech,
+        title: 'SolidWorks Advanced Surfacing',
+        notes: 'Deep dive into complex curves',
+      });
+
+      // Verify Monday changed
+      const updatedMonTech = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '14:00');
+      expect(updatedMonTech?.title).toBe('SolidWorks Advanced Surfacing');
+      expect(updatedMonTech?.notes).toBe('Deep dive into complex curves');
+
+      // Verify Tuesday technical block is completely unchanged
+      const tueTech = timeStore.getBlocksForDate('2026-11-10').find((b) => b.startTime === '14:00');
+      expect(tueTech?.title).toContain('ANSYS intro');
+      expect(tueTech?.notes).toBe('ANSYS introduction and FEA.');
+
+      // Verify Wednesday technical block is completely unchanged
+      const wedTech = timeStore.getBlocksForDate('2026-11-11').find((b) => b.startTime === '14:00');
+      expect(wedTech?.title).toContain('SolidWorks modelling');
+    });
+
+    it('preserves completed/skipped status without cascading incomplete blocks', async () => {
+      const timeStore = useTimetableStore.getState();
+
+      const monMorning = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '08:00')!;
+      const monJobApps = timeStore.getBlocksForDate('2026-11-09').find((b) => b.startTime === '09:00')!;
+
+      // Complete morning prep, skip job apps
+      await timeStore.setBlockStatus(monMorning.id, 'completed');
+      await timeStore.setBlockStatus(monJobApps.id, 'skipped');
+
+      // Verify Monday updated
+      expect(useTimetableStore.getState().blocks.find((b) => b.id === monMorning.id)?.status).toBe('completed');
+      expect(useTimetableStore.getState().blocks.find((b) => b.id === monJobApps.id)?.status).toBe('skipped');
+
+      // Tuesday blocks must remain pending (no cascading of skipped/incomplete activities)
+      const tueBlocks = useTimetableStore.getState().getBlocksForDate('2026-11-10');
+      for (const b of tueBlocks) {
+        expect(b.status).toBe('pending');
+      }
+    });
+
+    it('allows manual rescheduling of individual blocks without affecting other blocks', async () => {
+      const timeStore = useTimetableStore.getState();
+
+      const friLego = timeStore.getBlocksForDate('2026-11-13').find((b) => b.startTime === '20:00')!;
+      expect(friLego).toBeDefined();
+
+      // Reschedule Friday LEGO block to Saturday 2026-11-14 at 15:00
+      await timeStore.rescheduleBlock(friLego.id, '2026-11-14', '15:00', 90);
+
+      // Verify Friday 20:00 block no longer exists
+      expect(timeStore.getBlocksForDate('2026-11-13').find((b) => b.startTime === '20:00')).toBeUndefined();
+
+      // Verify Saturday 15:00 block exists with new duration
+      const satBlock = timeStore.getBlocksForDate('2026-11-14').find((b) => b.id === friLego.id);
+      expect(satBlock).toBeDefined();
+      expect(satBlock?.date).toBe('2026-11-14');
+      expect(satBlock?.startTime).toBe('15:00');
+      expect(satBlock?.durationMin).toBe(90);
+
+      // Verify Thursday LEGO block is completely untouched
+      const thuLego = timeStore.getBlocksForDate('2026-11-12').find((b) => b.startTime === '20:00');
+      expect(thuLego?.date).toBe('2026-11-12');
+      expect(thuLego?.startTime).toBe('20:00');
+    });
+
+    it('detects real-time conflicts against the populated routine and respects priorities', () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // Propose an interview on Monday 2026-11-09 at 09:30 (during 09:00 - 10:30 Indian job applications)
+      const conflicts = findConflictingBlocks(allBlocks, '2026-11-09', '09:30', 45);
+      expect(conflicts.length).toBe(1);
+      expect(conflicts[0].title).toBe('Indian job applications');
+
+      // Propose an urgent commitment during evening LEGO time (20:15 - 20:45)
+      const legoConflicts = findConflictingBlocks(allBlocks, '2026-11-09', '20:15', 30);
+      expect(legoConflicts.length).toBe(1);
+      expect(legoConflicts[0].title).toBe('LEGO McLaren P1');
+      expect(legoConflicts[0].priority).toBe('low'); // User can choose to override lower-priority activity
     });
   });
 });

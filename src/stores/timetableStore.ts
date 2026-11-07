@@ -5,6 +5,7 @@ import { dateToAppTimestamp, getCurrentISTDate } from '../utils/dateHelpers';
 import { generateId } from '../utils/idGenerator';
 import { Priority } from '../types/category';
 import { findConflictingBlocks } from '../utils/timetableValidators';
+import { getInitialWeek1Blocks } from '../constants/initialRoutine';
 
 export interface AddBlockParams {
   title: string;
@@ -28,6 +29,7 @@ interface TimetableState {
 
   // Actions
   loadInitialBlocks: (force?: boolean) => Promise<void>;
+  populateWeek1Routine: () => Promise<void>;
   setSelectedDate: (date: string) => void;
   setViewMode: (mode: 'daily' | 'weekly') => void;
   setBlocksFromEnvelope: (blocks: TimetableBlock[]) => void;
@@ -66,6 +68,24 @@ export const useTimetableStore = create<TimetableState>((set, get) => ({
       return;
     }
     set({ isLoading: true });
+    let blocks = await getStorage().getTimetableBlocks();
+    if (blocks.length === 0) {
+      // Automatically populate initial Week 1 routine
+      const initialBlocks = getInitialWeek1Blocks();
+      for (const b of initialBlocks) {
+        await getStorage().saveTimetableBlock(b);
+      }
+      blocks = await getStorage().getTimetableBlocks();
+    }
+    set({ blocks, isLoading: false });
+  },
+
+  populateWeek1Routine: async () => {
+    set({ isLoading: true });
+    const initialBlocks = getInitialWeek1Blocks();
+    for (const b of initialBlocks) {
+      await getStorage().saveTimetableBlock(b);
+    }
     const blocks = await getStorage().getTimetableBlocks();
     set({ blocks, isLoading: false });
   },
