@@ -9,8 +9,8 @@
 ## 1. Overall Progress Tracker
 - [x] Phase 1 Architecture & Specifications Approved (v2 with all 7 feedback points incorporated)
 - [x] Multi-AI Workflow & Documentation Governance Established
-- [ ] Environment Prerequisites Setup (Git & Node.js installation on host system)
-- [ ] Local Git Repository Initialization & Remote Sync with GitHub
+- [x] Environment Prerequisites Setup (Git & Node.js installed on host system)
+- [x] Local Git Repository Initialized & Synced with Remote (`main` branch on GitHub)
 - [ ] Step 1: Expo React Native + TypeScript Project Scaffolding
 - [ ] Step 2: Theme, Navigation & Base UI Components
 - [ ] Step 3: Firebase Dual-SDK Setup & EAS Development Build
@@ -32,7 +32,6 @@
 ---
 
 ## 2. Immediate Blockers & Action Items
-1. **Git Installation:** Host machine requires Git CLI (`git`) to initialize local repository and sync with GitHub (`https://github.com/MelvinEmmanuelTheodore/Task-managment-app-or-website`).
-2. **Node.js Installation:** Host machine requires Node.js (v20+ LTS recommended) for `npm`, `npx`, and Expo CLI execution.
-3. **User Confirmation Required:** Awaiting user verification of shared documentation files before commencing project build.
+1. **User Approval Required:** Review the shared documentation files and Git setup. Once you approve, we will begin **Step 1: Expo Project Scaffolding**.
+2. **Next Step:** Initialize Expo React Native project with TypeScript and Expo Router.
 
