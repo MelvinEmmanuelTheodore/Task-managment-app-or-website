@@ -38,6 +38,7 @@ export default function SettingsScreen() {
   const [isLocked, setIsLocked] = useState(false);
   const [lockReason, setLockReason] = useState<string | null>(null);
   const [showRawPayloadModal, setShowRawPayloadModal] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   // Import Preview State
   const [previewEnvelope, setPreviewEnvelope] = useState<StoredDataEnvelope | null>(null);
@@ -126,16 +127,34 @@ export default function SettingsScreen() {
   };
 
   /**
-   * Copy raw payload text
+   * Copy raw payload text safely across Web and Native
    */
-  const handleCopyRawPayload = () => {
+  const handleCopyRawPayload = async () => {
     const raw = getStorage().getRawCorruptedPayload() || '';
-    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(raw);
-      Alert.alert('Copied', 'Raw corrupted payload copied to clipboard.');
-    } else {
-      Alert.alert('Notice', 'Please select and copy the text directly from the text box.');
+    if (!raw) {
+      Alert.alert('Notice', 'No in-memory payload available.');
+      return;
     }
+
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(raw);
+        setCopyFeedback('✓ Copied to clipboard successfully!');
+        setTimeout(() => setCopyFeedback(null), 4000);
+        return;
+      } catch {
+        setCopyFeedback(null);
+        Alert.alert('Copy Failed', 'Browser prevented clipboard access. Please select and copy text manually from the box below.');
+        return;
+      }
+    }
+
+    // Android / native fallback
+    setCopyFeedback(null);
+    Alert.alert(
+      'Manual Copy on Android',
+      'Long-press inside the text box below, tap "Select All", and select "Copy".'
+    );
   };
 
   /**
@@ -394,19 +413,31 @@ export default function SettingsScreen() {
               <TextInput
                 multiline
                 editable={false}
+                selectTextOnFocus={true}
                 value={getStorage().getRawCorruptedPayload() || 'No in-memory payload found.'}
                 style={[styles.rawTextContainer, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.surfaceSecondary }]}
               />
+
+              {copyFeedback && (
+                <Text style={{ color: '#059669', fontSize: 13, marginTop: 8, fontWeight: '600', textAlign: 'center' }}>
+                  {copyFeedback}
+                </Text>
+              )}
 
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
                 <TouchableOpacity
                   onPress={handleCopyRawPayload}
                   style={[styles.modalButton, { backgroundColor: themeColors.primary, flex: 1 }]}
                 >
-                  <Text style={styles.modalButtonText}>Copy to Clipboard</Text>
+                  <Text style={styles.modalButtonText}>
+                    {Platform.OS === 'web' ? 'Copy to Clipboard' : 'How to Copy on Android'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setShowRawPayloadModal(false)}
+                  onPress={() => {
+                    setCopyFeedback(null);
+                    setShowRawPayloadModal(false);
+                  }}
                   style={[styles.cancelButton, { borderColor: themeColors.border, flex: 1 }]}
                 >
                   <Text style={[styles.cancelButtonText, { color: themeColors.textSecondary }]}>Close</Text>

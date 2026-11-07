@@ -15,6 +15,7 @@ export const RECOVERY_KEY_PREFIX = '@time_mgmt_app_data_recovery_';
 export const PRE_MIGRATION_KEY_PREFIX = '@time_mgmt_pre_migration_v1_';
 export const SNAPSHOT_KEY_PREFIX = '@time_mgmt_internal_rollback_snapshot_';
 export const CURRENT_SCHEMA_VERSION = 1;
+export const SUPPORTED_SCHEMA_VERSIONS = new Set<number>([1, 2]);
 
 export type MigrationStep = (data: any) => any;
 
@@ -193,7 +194,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
       return this.handleCorruptedPayload(raw, 'Invalid envelope structure: missing schemaVersion');
     }
 
-    if (parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
+    if (!SUPPORTED_SCHEMA_VERSIONS.has(parsed.schemaVersion)) {
       return this.handleCorruptedPayload(raw, `Unknown future schema version: ${parsed.schemaVersion}`);
     }
 
@@ -452,6 +453,10 @@ export class AsyncStorageAdapter implements IStorageAdapter {
 
       if (typeof parsed.schemaVersion !== 'number') {
         throw new Error('Cannot run migration: missing schemaVersion');
+      }
+
+      if (!SUPPORTED_SCHEMA_VERSIONS.has(targetVersion)) {
+        throw new Error(`Target migration schema version ${targetVersion} is not supported by this application version`);
       }
 
       if (parsed.schemaVersion >= targetVersion) {

@@ -5,7 +5,7 @@ import { TimetableBlock } from './timetable';
 import { UserSettings } from './settings';
 
 export interface StoredDataEnvelope {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   categories: Category[];
   topics: Topic[];
   topicTasks: TopicTask[];

@@ -170,6 +170,35 @@ describe('Step B0: Hardening & Resilience Suite', () => {
       expect(stored.schemaVersion).toBe(2);
     });
 
+    it('should successfully load and mutate data after migration from v1 to v2 without locking', async () => {
+      await adapter.loadAll(); // Seeds initial v1 data
+      expect((await adapter.loadAll()).schemaVersion).toBe(1);
+
+      const migrated = await adapter.migrateVersion(2);
+      expect(migrated.schemaVersion).toBe(2);
+
+      // Reader loads migrated v2 data without locking
+      const loadedAfter = await adapter.loadAll();
+      expect(adapter.isStorageLocked()).toBe(false);
+      expect(loadedAfter.schemaVersion).toBe(2);
+      expect(loadedAfter.categories.length).toBeGreaterThan(0);
+
+      // Reader allows mutations on v2 data
+      await adapter.saveCategory({
+        id: 'cat_v2_test',
+        name: 'V2 Category',
+        priority: 'high',
+        sortOrder: 1024,
+        color: '#000',
+        createdAt: dateToAppTimestamp(new Date()),
+        updatedAt: dateToAppTimestamp(new Date()),
+      });
+
+      const reloaded = await adapter.loadAll();
+      expect(reloaded.categories.some((c) => c.id === 'cat_v2_test')).toBe(true);
+      expect(reloaded.schemaVersion).toBe(2);
+    });
+
     it('should abort migration and leave original data untouched if pre-migration preservation fails', async () => {
       await adapter.loadAll();
       const v1Raw = await AsyncStorage.getItem(STORAGE_KEY);
