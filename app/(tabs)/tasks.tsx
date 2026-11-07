@@ -29,8 +29,11 @@ import {
   validateStartTime,
   validateDurationMin,
   validateDate,
+  validateEndTimeFormat,
+  validateBlockTiming,
   calculateEndTime,
   calculateDuration,
+  timeToMinutes,
   findConflictingBlocks,
 } from '../../src/utils/timetableValidators';
 
@@ -162,27 +165,57 @@ export default function TimetableScreen() {
   // Handlers for form duration / end time synchronization
   const handleStartTimeChange = (newStart: string) => {
     setStartTime(newStart);
+    setFormError(null);
     if (validateStartTime(newStart)) {
       const dur = parseInt(durationMin, 10);
       if (validateDurationMin(dur)) {
-        setEndTime(calculateEndTime(newStart, dur));
+        const startMins = timeToMinutes(newStart);
+        if (startMins + dur > 1440) {
+          setFormError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
+        } else {
+          setEndTime(calculateEndTime(newStart, dur));
+        }
       }
     }
   };
 
   const handleDurationChange = (newDurStr: string) => {
     setDurationMin(newDurStr);
+    setFormError(null);
     const dur = parseInt(newDurStr, 10);
     if (validateStartTime(startTime) && validateDurationMin(dur)) {
-      setEndTime(calculateEndTime(startTime, dur));
+      const startMins = timeToMinutes(startTime);
+      if (startMins + dur > 1440) {
+        setFormError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
+      } else {
+        setEndTime(calculateEndTime(startTime, dur));
+      }
     }
   };
 
   const handleEndTimeChange = (newEnd: string) => {
     setEndTime(newEnd);
-    if (validateStartTime(startTime) && validateStartTime(newEnd)) {
-      const calculated = calculateDuration(startTime, newEnd);
-      if (calculated >= 5 && calculated <= 480) {
+    setFormError(null);
+    if (!validateStartTime(startTime)) {
+      return;
+    }
+    if (validateEndTimeFormat(newEnd)) {
+      const startMins = timeToMinutes(startTime);
+      const endMins = timeToMinutes(newEnd);
+      if (endMins <= startMins) {
+        setFormError('End time must be after start time on the same day. Overnight blocks spanning past midnight are not supported.');
+        return;
+      }
+      if (endMins > 1440) {
+        setFormError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
+        return;
+      }
+      const calculated = endMins - startMins;
+      if (calculated < 5) {
+        setFormError('Duration must be at least 5 minutes.');
+      } else if (calculated > 480) {
+        setFormError('Duration cannot exceed 480 minutes (8 hours).');
+      } else {
         setDurationMin(calculated.toString());
       }
     }
@@ -254,13 +287,11 @@ export default function TimetableScreen() {
       setFormError('Target date must be a valid calendar date in YYYY-MM-DD format.');
       return;
     }
-    if (!validateStartTime(startTime)) {
-      setFormError('Start time must be in HH:mm 24-hour format (e.g. 09:30 or 14:00).');
-      return;
-    }
+
     const dur = parseInt(durationMin, 10);
-    if (!validateDurationMin(dur)) {
-      setFormError('Duration must be between 5 and 480 minutes.');
+    const timingValidation = validateBlockTiming(startTime, endTime, dur);
+    if (!timingValidation.valid) {
+      setFormError(timingValidation.error || 'Invalid time or duration settings.');
       return;
     }
 
@@ -308,7 +339,13 @@ export default function TimetableScreen() {
       return;
     }
     if (!validateStartTime(rescheduleNewTime)) {
-      setRescheduleError('Start time must be formatted as HH:mm.');
+      setRescheduleError('Start time must be formatted as HH:mm (00:00 to 23:59).');
+      return;
+    }
+
+    const startMins = timeToMinutes(rescheduleNewTime);
+    if (startMins + rescheduleTarget.durationMin > 1440) {
+      setRescheduleError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
       return;
     }
 

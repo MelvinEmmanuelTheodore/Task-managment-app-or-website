@@ -10,8 +10,10 @@ import {
   hasOverlap,
   findConflictingBlocks,
   validateStartTime,
+  validateEndTimeFormat,
   validateDurationMin,
   validateDate,
+  validateBlockTiming,
 } from '../utils/timetableValidators';
 import {
   addDays,
@@ -44,24 +46,35 @@ describe('Timetable Core Functionality Suite', () => {
       expect(minutesToTime(1439)).toBe('23:59');
     });
 
-    it('calculates end time from start time and duration', () => {
+    it('calculates end time from start time and duration (including 24:00 midnight)', () => {
       expect(calculateEndTime('09:00', 60)).toBe('10:00');
       expect(calculateEndTime('09:30', 45)).toBe('10:15');
-      expect(calculateEndTime('23:00', 90)).toBe('00:30'); // wraps midnight
+      expect(calculateEndTime('23:00', 60)).toBe('24:00'); // same-day midnight end
     });
 
     it('calculates duration in minutes between start and end times', () => {
       expect(calculateDuration('09:00', '10:00')).toBe(60);
       expect(calculateDuration('09:30', '11:15')).toBe(105);
-      expect(calculateDuration('23:00', '00:30')).toBe(90); // wraps midnight
+      expect(calculateDuration('23:00', '24:00')).toBe(60);
+      // Inverted or overnight times return 0 (not supported)
+      expect(calculateDuration('23:00', '00:30')).toBe(0);
+      expect(calculateDuration('10:00', '09:00')).toBe(0);
     });
 
     it('validates start time format', () => {
       expect(validateStartTime('09:00')).toBe(true);
       expect(validateStartTime('18:45')).toBe(true);
-      expect(validateStartTime('24:00')).toBe(false);
+      expect(validateStartTime('24:00')).toBe(false); // start time cannot be 24:00
       expect(validateStartTime('9:00')).toBe(false);
       expect(validateStartTime('invalid')).toBe(false);
+    });
+
+    it('validates end time format (accepts 00:00-23:59 and 24:00)', () => {
+      expect(validateEndTimeFormat('10:00')).toBe(true);
+      expect(validateEndTimeFormat('24:00')).toBe(true);
+      expect(validateEndTimeFormat('24:30')).toBe(false);
+      expect(validateEndTimeFormat('10:99')).toBe(false);
+      expect(validateEndTimeFormat('')).toBe(false);
     });
 
     it('validates duration bounds (5 to 480 minutes)', () => {
@@ -79,6 +92,95 @@ describe('Timetable Core Functionality Suite', () => {
       expect(validateDate('2026-02-29')).toBe(false); // 2026 not leap year
       expect(validateDate('2026-04-31')).toBe(false); // April has 30 days
       expect(validateDate('2026-13-01')).toBe(false); // Invalid month
+    });
+  });
+
+  // 1b. End-Time, Duration Consistency & Overnight Prevention
+  describe('1b. End-Time, Duration Consistency & Overnight Prevention', () => {
+    it('accepts valid same-day block timing with matching values', () => {
+      const res1 = validateBlockTiming('09:00', '10:00', 60);
+      expect(res1.valid).toBe(true);
+      expect(res1.startMinutes).toBe(540);
+      expect(res1.endMinutes).toBe(600);
+      expect(res1.durationMin).toBe(60);
+
+      const res2 = validateBlockTiming('23:00', '24:00', 60);
+      expect(res2.valid).toBe(true);
+      expect(res2.startMinutes).toBe(1380);
+      expect(res2.endMinutes).toBe(1440);
+    });
+
+    it('rejects end time that occurs before or at start time (preventing reverse/overnight)', () => {
+      const res = validateBlockTiming('09:00', '08:00', 60);
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain('End time must be after start time on the same day');
+      expect(res.error).toContain('Overnight blocks spanning past midnight are not supported');
+
+      const equalRes = validateBlockTiming('09:00', '09:00', 60);
+      expect(equalRes.valid).toBe(false);
+      expect(equalRes.error).toContain('End time must be after start time on the same day');
+    });
+
+    it('rejects blocks that extend past midnight (24:00)', () => {
+      // 23:00 with 90 min duration attempts to end at 00:30 next day
+      const res = validateBlockTiming('23:00', '00:30', 90);
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain('Overnight blocks spanning past midnight are not supported');
+
+      // 23:30 with 60 min duration attempts to end at 00:30 next day
+      const res2 = validateBlockTiming('23:30', '00:30', 60);
+      expect(res2.valid).toBe(false);
+      expect(res2.error).toContain('Overnight blocks spanning past midnight are not supported');
+    });
+
+    it('rejects and displays clear message when end-time and duration disagree', () => {
+      // User entered 09:00 start, 11:00 end, but duration was left at 60m
+      const res = validateBlockTiming('09:00', '11:00', 60);
+      expect(res.valid).toBe(false);
+      expect(res.error).toContain('disagree');
+      expect(res.error).toContain('09:00');
+      expect(res.error).toContain('11:00');
+      expect(res.error).toContain('60m');
+      expect(res.error).toContain('expected end time is 10:00');
+    });
+
+    it('rejects malformed end time formats', () => {
+      const res1 = validateBlockTiming('09:00', '10:99', 60);
+      expect(res1.valid).toBe(false);
+      expect(res1.error).toContain('End time must be in HH:mm 24-hour format');
+
+      const res2 = validateBlockTiming('09:00', '25:00', 60);
+      expect(res2.valid).toBe(false);
+      expect(res2.error).toContain('End time must be in HH:mm 24-hour format');
+    });
+
+    it('ensures consecutive blocks on midnight boundary do not collide', () => {
+      // Block on Nov 9: 23:00 to 24:00 (duration 60)
+      const nov9Blocks: TimetableBlock[] = [
+        {
+          id: 'blk_nov9',
+          title: 'Night Review',
+          categoryId: 'cat_work',
+          priority: 'medium',
+          date: '2026-11-09',
+          startTime: '23:00',
+          durationMin: 60,
+          isFixed: false,
+          notes: '',
+          status: 'pending',
+          createdAt: { seconds: 1, nanoseconds: 0 },
+          updatedAt: { seconds: 1, nanoseconds: 0 },
+        },
+      ];
+
+      // Propose block on Nov 10: 00:00 to 01:00
+      // Same time window on Nov 10 should find 0 conflicts with Nov 9
+      const conflictsNov10 = findConflictingBlocks(nov9Blocks, '2026-11-10', '00:00', 60);
+      expect(conflictsNov10.length).toBe(0);
+
+      // Same time window on Nov 9 should find 1 conflict
+      const conflictsNov9 = findConflictingBlocks(nov9Blocks, '2026-11-09', '23:30', 30);
+      expect(conflictsNov9.length).toBe(1);
     });
   });
 
@@ -416,3 +518,4 @@ describe('Timetable Core Functionality Suite', () => {
     });
   });
 });
+
