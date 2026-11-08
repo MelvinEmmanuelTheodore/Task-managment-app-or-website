@@ -23,7 +23,9 @@ import { TopicTask } from '../../types/topicTask';
 let activeUnsubscribes: Unsubscribe[] = [];
 let storageMutationUnsubscribe: (() => void) | null = null;
 let currentSyncUid: string | null = null;
-let isApplyingRemoteSync = false;
+
+// Re-entrant suppression counter to prevent echo writes across concurrent collection listeners
+let remoteSyncSuppressionDepth = 0;
 
 export type SyncState = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 let currentSyncState: SyncState = 'idle';
@@ -37,7 +39,21 @@ export function getSyncStatus(): { state: SyncState; error: string | null } {
 }
 
 export function isCurrentlyApplyingRemoteSync(): boolean {
-  return isApplyingRemoteSync;
+  return remoteSyncSuppressionDepth > 0;
+}
+
+/**
+ * Execute an asynchronous action with remote sync suppression active.
+ * Uses a re-entrant depth counter so overlapping/concurrent listeners never prematurely
+ * disable suppression.
+ */
+export async function withRemoteSyncSuppressed<T>(action: () => Promise<T>): Promise<T> {
+  remoteSyncSuppressionDepth++;
+  try {
+    return await action();
+  } finally {
+    remoteSyncSuppressionDepth = Math.max(0, remoteSyncSuppressionDepth - 1);
+  }
 }
 
 /**
@@ -79,22 +95,54 @@ export function isRemoteTimestampNewer(remoteTs: any, localTs: any): boolean {
   return remoteNano > localNano;
 }
 
+export interface ChunkedBatchResult {
+  totalOperations: number;
+  committedChunks: number;
+  totalChunks: number;
+}
+
 /**
- * Commit operations in safe chunks of 400 to respect Firestore's 500-op batch write limit.
+ * Executes operations in chunks of up to 400 to respect Firestore's 500-operation per-batch limit.
+ * NOTE: Each chunk commits as its own independent atomic batch. If a chunk fails, previous
+ * chunks remain committed. Partial failures are accurately tracked, reported, and thrown.
  */
-async function commitInChunks(
+export async function commitInChunks(
   db: Firestore,
   operations: ((batch: WriteBatch) => void)[]
-): Promise<void> {
+): Promise<ChunkedBatchResult> {
+  if (operations.length === 0) {
+    return { totalOperations: 0, committedChunks: 0, totalChunks: 0 };
+  }
+
   const CHUNK_SIZE = 400;
+  const totalChunks = Math.ceil(operations.length / CHUNK_SIZE);
+  let committedChunks = 0;
+
   for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+    const chunkIndex = Math.floor(i / CHUNK_SIZE);
     const batch = writeBatch(db);
     const chunk = operations.slice(i, i + CHUNK_SIZE);
+
     for (const op of chunk) {
       op(batch);
     }
-    await batch.commit();
+
+    try {
+      await batch.commit();
+      committedChunks++;
+    } catch (err: any) {
+      const errorMsg = `Batch write failed at chunk ${chunkIndex + 1} of ${totalChunks} (${committedChunks} committed): ${err?.message || err}`;
+      currentSyncState = 'error';
+      currentSyncError = errorMsg;
+      throw new Error(errorMsg);
+    }
   }
+
+  return {
+    totalOperations: operations.length,
+    committedChunks,
+    totalChunks,
+  };
 }
 
 /**
@@ -115,7 +163,7 @@ export async function checkCloudDataExists(uid: string): Promise<boolean> {
 }
 
 /**
- * Upload all current local data (blocks, categories, topics, tasks) to Firestore in atomic batches.
+ * Upload all current local data (blocks, categories, topics, tasks) to Firestore in sequential batches.
  * Idempotent, safe, and preserves all completed and skipped statuses.
  */
 export async function migrateAllLocalDataToCloud(uid: string): Promise<{
@@ -188,13 +236,13 @@ export async function migrateAllLocalDataToCloud(uid: string): Promise<{
 
 /**
  * Handle local storage mutation events and immediately synchronise them to Firestore.
- * Breaks loops if isApplyingRemoteSync is true.
+ * Suppressed if remote sync is actively writing to local storage.
  */
 export async function handleLocalMutationToCloud(
   event: StorageMutationEvent,
   uid: string
 ): Promise<void> {
-  if (isApplyingRemoteSync || !uid) {
+  if (isCurrentlyApplyingRemoteSync() || !uid) {
     return;
   }
 
@@ -326,15 +374,17 @@ export async function handleLocalMutationToCloud(
     console.warn('[Sync] Local-to-cloud write error:', err);
     currentSyncState = 'error';
     currentSyncError = err?.message || 'Sync write failed';
+    throw err;
   }
 }
 
 /**
  * Start real-time Firestore synchronization for a signed-in user.
  * 1. Registers storage mutation observer for local-to-cloud sync.
- * 2. Listens to remote Firestore changes for cloud-to-local sync (adds, updates, deletions).
- * 3. Enforces conflict resolution via timestamp comparisons.
- * 4. Guards against infinite sync loops via isApplyingRemoteSync flag.
+ * 2. Initial reconciliation: bidirectional merge preserving all offline/local-created records.
+ * 3. Subsequent snapshots: processes real-time additions, updates, and genuine remote deletions.
+ * 4. Conflict resolution: timestamp comparisons prevent stale overwrites.
+ * 5. Loop prevention: concurrency-safe suppression counter protects all collection listeners.
  */
 export function startFirestoreSync(uid: string): () => void {
   if (currentSyncUid === uid && activeUnsubscribes.length > 0) {
@@ -359,13 +409,13 @@ export function startFirestoreSync(uid: string): () => void {
     });
   });
 
-  // Track initial snapshot loads to reconcile any orphaned local items
+  // Track initial snapshot loads for each collection
   let isInitialBlocks = true;
   let isInitialCats = true;
   let isInitialTopics = true;
   let isInitialTasks = true;
 
-  // 2. Timetable Blocks Listener (Cloud -> Local)
+  // 2. Timetable Blocks Listener (Cloud <-> Local)
   const blocksCol = collection(db, 'users', uid, 'timetableBlocks');
   const unsubBlocks = onSnapshot(
     blocksCol,
@@ -374,67 +424,93 @@ export function startFirestoreSync(uid: string): () => void {
         return;
       }
 
-      isApplyingRemoteSync = true;
-      try {
-        currentSyncState = 'syncing';
-        const currentBlocks = await getStorage().getTimetableBlocks();
-        const blockMap = new Map<string, TimetableBlock>(currentBlocks.map((b) => [b.id, b]));
-        let hasChanges = false;
+      await withRemoteSyncSuppressed(async () => {
+        try {
+          currentSyncState = 'syncing';
+          const currentBlocks = await getStorage().getTimetableBlocks();
+          const blockMap = new Map<string, TimetableBlock>(currentBlocks.map((b) => [b.id, b]));
+          let hasChanges = false;
 
-        const docChanges = snapshot.docChanges();
+          if (isInitialBlocks) {
+            isInitialBlocks = false;
+            const remoteDocMap = new Map<string, TimetableBlock>();
+            snapshot.docs.forEach((d) => {
+              remoteDocMap.set(d.id, d.data() as TimetableBlock);
+            });
 
-        for (const change of docChanges) {
-          const docId = change.doc.id;
-          if (change.type === 'removed') {
-            if (blockMap.has(docId)) {
-              blockMap.delete(docId);
-              await getStorage().deleteTimetableBlock(docId);
-              hasChanges = true;
+            // A. Reconcile all remote docs against local
+            for (const [remoteId, remoteBlock] of remoteDocMap.entries()) {
+              const localBlock = blockMap.get(remoteId);
+              if (!localBlock || isRemoteTimestampNewer(remoteBlock.updatedAt, localBlock.updatedAt)) {
+                // Cloud-only or cloud is newer: apply locally
+                blockMap.set(remoteId, remoteBlock);
+                await getStorage().saveTimetableBlock(remoteBlock);
+                hasChanges = true;
+              } else if (localBlock && isRemoteTimestampNewer(localBlock.updatedAt, remoteBlock.updatedAt)) {
+                // Local is strictly newer: upload local to Firestore
+                const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
+                try {
+                  await setDoc(blockRef, localBlock, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload newer local block to cloud:', err);
+                }
+              }
+            }
+
+            // B. Preserve & upload local-only records (offline-created or pre-existing)
+            for (const [localId, localBlock] of blockMap.entries()) {
+              if (!remoteDocMap.has(localId)) {
+                const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
+                try {
+                  await setDoc(blockRef, localBlock, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload local-only block to cloud:', err);
+                }
+              }
             }
           } else {
-            // 'added' or 'modified'
-            const remoteBlock = change.doc.data() as TimetableBlock;
-            const localBlock = blockMap.get(docId);
+            // Subsequent snapshots: process incremental docChanges
+            const docChanges = snapshot.docChanges();
+            for (const change of docChanges) {
+              const docId = change.doc.id;
+              if (change.type === 'removed') {
+                // Genuine remote deletion!
+                if (blockMap.has(docId)) {
+                  blockMap.delete(docId);
+                  await getStorage().deleteTimetableBlock(docId);
+                  hasChanges = true;
+                }
+              } else {
+                // 'added' or 'modified'
+                const remoteBlock = change.doc.data() as TimetableBlock;
+                const localBlock = blockMap.get(docId);
 
-            // Conflict check: only apply if remote is strictly newer or local does not exist
-            if (!localBlock || isRemoteTimestampNewer(remoteBlock.updatedAt, localBlock.updatedAt)) {
-              blockMap.set(docId, remoteBlock);
-              await getStorage().saveTimetableBlock(remoteBlock);
-              hasChanges = true;
-            } else if (localBlock && isRemoteTimestampNewer(localBlock.updatedAt, remoteBlock.updatedAt)) {
-              // Local is newer (e.g. offline edit before connecting); sync local up to cloud
-              const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
-              Promise.resolve(setDoc(blockRef, localBlock, { merge: true })).catch(() => {});
-            }
-          }
-        }
-
-        // On initial snapshot, if cloud has documents, reconcile any deleted blocks not present in cloud
-        if (isInitialBlocks) {
-          isInitialBlocks = false;
-          const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
-          if (remoteDocIds.size > 0) {
-            for (const [localId] of blockMap.entries()) {
-              if (!remoteDocIds.has(localId)) {
-                blockMap.delete(localId);
-                await getStorage().deleteTimetableBlock(localId);
-                hasChanges = true;
+                if (!localBlock || isRemoteTimestampNewer(remoteBlock.updatedAt, localBlock.updatedAt)) {
+                  blockMap.set(docId, remoteBlock);
+                  await getStorage().saveTimetableBlock(remoteBlock);
+                  hasChanges = true;
+                } else if (localBlock && isRemoteTimestampNewer(localBlock.updatedAt, remoteBlock.updatedAt)) {
+                  const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
+                  try {
+                    await setDoc(blockRef, localBlock, { merge: true });
+                  } catch (err) {
+                    console.warn('[Sync] Failed to upload newer local block:', err);
+                  }
+                }
               }
             }
           }
-        }
 
-        if (hasChanges) {
-          useTimetableStore.getState().setBlocksFromEnvelope(Array.from(blockMap.values()));
+          if (hasChanges) {
+            useTimetableStore.getState().setBlocksFromEnvelope(Array.from(blockMap.values()));
+          }
+          currentSyncState = 'synced';
+        } catch (err: any) {
+          console.warn('[Sync] Blocks listener warning:', err);
+          currentSyncState = 'error';
+          currentSyncError = err?.message || 'Blocks sync error';
         }
-        currentSyncState = 'synced';
-      } catch (err: any) {
-        console.warn('[Sync] Blocks listener warning:', err);
-        currentSyncState = 'error';
-        currentSyncError = err?.message || 'Blocks sync error';
-      } finally {
-        isApplyingRemoteSync = false;
-      }
+      });
     },
     (err) => {
       console.warn('[Sync] Blocks listener error:', err);
@@ -444,7 +520,7 @@ export function startFirestoreSync(uid: string): () => void {
   );
   activeUnsubscribes.push(unsubBlocks);
 
-  // 3. Categories Listener (Cloud -> Local)
+  // 3. Categories Listener (Cloud <-> Local)
   const catsCol = collection(db, 'users', uid, 'categories');
   const unsubCats = onSnapshot(
     catsCol,
@@ -453,63 +529,86 @@ export function startFirestoreSync(uid: string): () => void {
         return;
       }
 
-      isApplyingRemoteSync = true;
-      try {
-        currentSyncState = 'syncing';
-        const currentCats = await getStorage().getCategories();
-        const catMap = new Map<string, Category>(currentCats.map((c) => [c.id, c]));
-        let hasChanges = false;
+      await withRemoteSyncSuppressed(async () => {
+        try {
+          currentSyncState = 'syncing';
+          const currentCats = await getStorage().getCategories();
+          const catMap = new Map<string, Category>(currentCats.map((c) => [c.id, c]));
+          let hasChanges = false;
 
-        const docChanges = snapshot.docChanges();
+          if (isInitialCats) {
+            isInitialCats = false;
+            const remoteDocMap = new Map<string, Category>();
+            snapshot.docs.forEach((d) => {
+              remoteDocMap.set(d.id, d.data() as Category);
+            });
 
-        for (const change of docChanges) {
-          const docId = change.doc.id;
-          if (change.type === 'removed') {
-            if (catMap.has(docId)) {
-              catMap.delete(docId);
-              await getStorage().deleteCategory(docId);
-              hasChanges = true;
+            for (const [remoteId, remoteCat] of remoteDocMap.entries()) {
+              const localCat = catMap.get(remoteId);
+              if (!localCat || isRemoteTimestampNewer(remoteCat.updatedAt, localCat.updatedAt)) {
+                catMap.set(remoteId, remoteCat);
+                await getStorage().saveCategory(remoteCat);
+                hasChanges = true;
+              } else if (localCat && isRemoteTimestampNewer(localCat.updatedAt, remoteCat.updatedAt)) {
+                const catRef = doc(db, 'users', uid, 'categories', localCat.id);
+                try {
+                  await setDoc(catRef, localCat, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload newer local category:', err);
+                }
+              }
+            }
+
+            for (const [localId, localCat] of catMap.entries()) {
+              if (!remoteDocMap.has(localId)) {
+                const catRef = doc(db, 'users', uid, 'categories', localCat.id);
+                try {
+                  await setDoc(catRef, localCat, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload local-only category:', err);
+                }
+              }
             }
           } else {
-            const remoteCat = change.doc.data() as Category;
-            const localCat = catMap.get(docId);
+            const docChanges = snapshot.docChanges();
+            for (const change of docChanges) {
+              const docId = change.doc.id;
+              if (change.type === 'removed') {
+                if (catMap.has(docId)) {
+                  catMap.delete(docId);
+                  await getStorage().deleteCategory(docId);
+                  hasChanges = true;
+                }
+              } else {
+                const remoteCat = change.doc.data() as Category;
+                const localCat = catMap.get(docId);
 
-            if (!localCat || isRemoteTimestampNewer(remoteCat.updatedAt, localCat.updatedAt)) {
-              catMap.set(docId, remoteCat);
-              await getStorage().saveCategory(remoteCat);
-              hasChanges = true;
-            } else if (localCat && isRemoteTimestampNewer(localCat.updatedAt, remoteCat.updatedAt)) {
-              const catRef = doc(db, 'users', uid, 'categories', localCat.id);
-              Promise.resolve(setDoc(catRef, localCat, { merge: true })).catch(() => {});
-            }
-          }
-        }
-
-        if (isInitialCats) {
-          isInitialCats = false;
-          const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
-          if (remoteDocIds.size > 0) {
-            for (const [localId] of catMap.entries()) {
-              if (!remoteDocIds.has(localId)) {
-                catMap.delete(localId);
-                await getStorage().deleteCategory(localId);
-                hasChanges = true;
+                if (!localCat || isRemoteTimestampNewer(remoteCat.updatedAt, localCat.updatedAt)) {
+                  catMap.set(docId, remoteCat);
+                  await getStorage().saveCategory(remoteCat);
+                  hasChanges = true;
+                } else if (localCat && isRemoteTimestampNewer(localCat.updatedAt, remoteCat.updatedAt)) {
+                  const catRef = doc(db, 'users', uid, 'categories', localCat.id);
+                  try {
+                    await setDoc(catRef, localCat, { merge: true });
+                  } catch (err) {
+                    console.warn('[Sync] Failed to upload newer local category:', err);
+                  }
+                }
               }
             }
           }
-        }
 
-        if (hasChanges) {
-          await useCategoryTopicStore.getState().loadInitialData(true);
+          if (hasChanges) {
+            await useCategoryTopicStore.getState().loadInitialData(true);
+          }
+          currentSyncState = 'synced';
+        } catch (err: any) {
+          console.warn('[Sync] Categories listener warning:', err);
+          currentSyncState = 'error';
+          currentSyncError = err?.message || 'Categories sync error';
         }
-        currentSyncState = 'synced';
-      } catch (err: any) {
-        console.warn('[Sync] Categories listener warning:', err);
-        currentSyncState = 'error';
-        currentSyncError = err?.message || 'Categories sync error';
-      } finally {
-        isApplyingRemoteSync = false;
-      }
+      });
     },
     (err) => {
       console.warn('[Sync] Categories listener error:', err);
@@ -519,7 +618,7 @@ export function startFirestoreSync(uid: string): () => void {
   );
   activeUnsubscribes.push(unsubCats);
 
-  // 4. Topics Listener (Cloud -> Local)
+  // 4. Topics Listener (Cloud <-> Local)
   const topicsCol = collection(db, 'users', uid, 'topics');
   const unsubTopics = onSnapshot(
     topicsCol,
@@ -528,63 +627,86 @@ export function startFirestoreSync(uid: string): () => void {
         return;
       }
 
-      isApplyingRemoteSync = true;
-      try {
-        currentSyncState = 'syncing';
-        const currentTopics = await getStorage().getTopics();
-        const topicMap = new Map<string, Topic>(currentTopics.map((t) => [t.id, t]));
-        let hasChanges = false;
+      await withRemoteSyncSuppressed(async () => {
+        try {
+          currentSyncState = 'syncing';
+          const currentTopics = await getStorage().getTopics();
+          const topicMap = new Map<string, Topic>(currentTopics.map((t) => [t.id, t]));
+          let hasChanges = false;
 
-        const docChanges = snapshot.docChanges();
+          if (isInitialTopics) {
+            isInitialTopics = false;
+            const remoteDocMap = new Map<string, Topic>();
+            snapshot.docs.forEach((d) => {
+              remoteDocMap.set(d.id, d.data() as Topic);
+            });
 
-        for (const change of docChanges) {
-          const docId = change.doc.id;
-          if (change.type === 'removed') {
-            if (topicMap.has(docId)) {
-              topicMap.delete(docId);
-              await getStorage().deleteTopic(docId);
-              hasChanges = true;
+            for (const [remoteId, remoteTopic] of remoteDocMap.entries()) {
+              const localTopic = topicMap.get(remoteId);
+              if (!localTopic || isRemoteTimestampNewer(remoteTopic.updatedAt, localTopic.updatedAt)) {
+                topicMap.set(remoteId, remoteTopic);
+                await getStorage().saveTopic(remoteTopic);
+                hasChanges = true;
+              } else if (localTopic && isRemoteTimestampNewer(localTopic.updatedAt, remoteTopic.updatedAt)) {
+                const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
+                try {
+                  await setDoc(topRef, localTopic, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload newer local topic:', err);
+                }
+              }
+            }
+
+            for (const [localId, localTopic] of topicMap.entries()) {
+              if (!remoteDocMap.has(localId)) {
+                const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
+                try {
+                  await setDoc(topRef, localTopic, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload local-only topic:', err);
+                }
+              }
             }
           } else {
-            const remoteTopic = change.doc.data() as Topic;
-            const localTopic = topicMap.get(docId);
+            const docChanges = snapshot.docChanges();
+            for (const change of docChanges) {
+              const docId = change.doc.id;
+              if (change.type === 'removed') {
+                if (topicMap.has(docId)) {
+                  topicMap.delete(docId);
+                  await getStorage().deleteTopic(docId);
+                  hasChanges = true;
+                }
+              } else {
+                const remoteTopic = change.doc.data() as Topic;
+                const localTopic = topicMap.get(docId);
 
-            if (!localTopic || isRemoteTimestampNewer(remoteTopic.updatedAt, localTopic.updatedAt)) {
-              topicMap.set(docId, remoteTopic);
-              await getStorage().saveTopic(remoteTopic);
-              hasChanges = true;
-            } else if (localTopic && isRemoteTimestampNewer(localTopic.updatedAt, remoteTopic.updatedAt)) {
-              const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
-              Promise.resolve(setDoc(topRef, localTopic, { merge: true })).catch(() => {});
-            }
-          }
-        }
-
-        if (isInitialTopics) {
-          isInitialTopics = false;
-          const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
-          if (remoteDocIds.size > 0) {
-            for (const [localId] of topicMap.entries()) {
-              if (!remoteDocIds.has(localId)) {
-                topicMap.delete(localId);
-                await getStorage().deleteTopic(localId);
-                hasChanges = true;
+                if (!localTopic || isRemoteTimestampNewer(remoteTopic.updatedAt, localTopic.updatedAt)) {
+                  topicMap.set(docId, remoteTopic);
+                  await getStorage().saveTopic(remoteTopic);
+                  hasChanges = true;
+                } else if (localTopic && isRemoteTimestampNewer(localTopic.updatedAt, remoteTopic.updatedAt)) {
+                  const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
+                  try {
+                    await setDoc(topRef, localTopic, { merge: true });
+                  } catch (err) {
+                    console.warn('[Sync] Failed to upload newer local topic:', err);
+                  }
+                }
               }
             }
           }
-        }
 
-        if (hasChanges) {
-          await useCategoryTopicStore.getState().loadInitialData(true);
+          if (hasChanges) {
+            await useCategoryTopicStore.getState().loadInitialData(true);
+          }
+          currentSyncState = 'synced';
+        } catch (err: any) {
+          console.warn('[Sync] Topics listener warning:', err);
+          currentSyncState = 'error';
+          currentSyncError = err?.message || 'Topics sync error';
         }
-        currentSyncState = 'synced';
-      } catch (err: any) {
-        console.warn('[Sync] Topics listener warning:', err);
-        currentSyncState = 'error';
-        currentSyncError = err?.message || 'Topics sync error';
-      } finally {
-        isApplyingRemoteSync = false;
-      }
+      });
     },
     (err) => {
       console.warn('[Sync] Topics listener error:', err);
@@ -594,7 +716,7 @@ export function startFirestoreSync(uid: string): () => void {
   );
   activeUnsubscribes.push(unsubTopics);
 
-  // 5. Topic Tasks Listener (Cloud -> Local)
+  // 5. Topic Tasks Listener (Cloud <-> Local)
   const tasksCol = collection(db, 'users', uid, 'topicTasks');
   const unsubTasks = onSnapshot(
     tasksCol,
@@ -603,63 +725,86 @@ export function startFirestoreSync(uid: string): () => void {
         return;
       }
 
-      isApplyingRemoteSync = true;
-      try {
-        currentSyncState = 'syncing';
-        const currentTasks = await getStorage().getTopicTasks();
-        const taskMap = new Map<string, TopicTask>(currentTasks.map((t) => [t.id, t]));
-        let hasChanges = false;
+      await withRemoteSyncSuppressed(async () => {
+        try {
+          currentSyncState = 'syncing';
+          const currentTasks = await getStorage().getTopicTasks();
+          const taskMap = new Map<string, TopicTask>(currentTasks.map((t) => [t.id, t]));
+          let hasChanges = false;
 
-        const docChanges = snapshot.docChanges();
+          if (isInitialTasks) {
+            isInitialTasks = false;
+            const remoteDocMap = new Map<string, TopicTask>();
+            snapshot.docs.forEach((d) => {
+              remoteDocMap.set(d.id, d.data() as TopicTask);
+            });
 
-        for (const change of docChanges) {
-          const docId = change.doc.id;
-          if (change.type === 'removed') {
-            if (taskMap.has(docId)) {
-              taskMap.delete(docId);
-              await getStorage().deleteTopicTask(docId);
-              hasChanges = true;
+            for (const [remoteId, remoteTask] of remoteDocMap.entries()) {
+              const localTask = taskMap.get(remoteId);
+              if (!localTask || isRemoteTimestampNewer(remoteTask.updatedAt, localTask.updatedAt)) {
+                taskMap.set(remoteId, remoteTask);
+                await getStorage().saveTopicTask(remoteTask);
+                hasChanges = true;
+              } else if (localTask && isRemoteTimestampNewer(localTask.updatedAt, remoteTask.updatedAt)) {
+                const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
+                try {
+                  await setDoc(taskRef, localTask, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload newer local task:', err);
+                }
+              }
+            }
+
+            for (const [localId, localTask] of taskMap.entries()) {
+              if (!remoteDocMap.has(localId)) {
+                const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
+                try {
+                  await setDoc(taskRef, localTask, { merge: true });
+                } catch (err) {
+                  console.warn('[Sync] Failed to upload local-only task:', err);
+                }
+              }
             }
           } else {
-            const remoteTask = change.doc.data() as TopicTask;
-            const localTask = taskMap.get(docId);
+            const docChanges = snapshot.docChanges();
+            for (const change of docChanges) {
+              const docId = change.doc.id;
+              if (change.type === 'removed') {
+                if (taskMap.has(docId)) {
+                  taskMap.delete(docId);
+                  await getStorage().deleteTopicTask(docId);
+                  hasChanges = true;
+                }
+              } else {
+                const remoteTask = change.doc.data() as TopicTask;
+                const localTask = taskMap.get(docId);
 
-            if (!localTask || isRemoteTimestampNewer(remoteTask.updatedAt, localTask.updatedAt)) {
-              taskMap.set(docId, remoteTask);
-              await getStorage().saveTopicTask(remoteTask);
-              hasChanges = true;
-            } else if (localTask && isRemoteTimestampNewer(localTask.updatedAt, remoteTask.updatedAt)) {
-              const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
-              Promise.resolve(setDoc(taskRef, localTask, { merge: true })).catch(() => {});
-            }
-          }
-        }
-
-        if (isInitialTasks) {
-          isInitialTasks = false;
-          const remoteDocIds = new Set(snapshot.docs.map((d) => d.id));
-          if (remoteDocIds.size > 0) {
-            for (const [localId] of taskMap.entries()) {
-              if (!remoteDocIds.has(localId)) {
-                taskMap.delete(localId);
-                await getStorage().deleteTopicTask(localId);
-                hasChanges = true;
+                if (!localTask || isRemoteTimestampNewer(remoteTask.updatedAt, localTask.updatedAt)) {
+                  taskMap.set(docId, remoteTask);
+                  await getStorage().saveTopicTask(remoteTask);
+                  hasChanges = true;
+                } else if (localTask && isRemoteTimestampNewer(localTask.updatedAt, remoteTask.updatedAt)) {
+                  const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
+                  try {
+                    await setDoc(taskRef, localTask, { merge: true });
+                  } catch (err) {
+                    console.warn('[Sync] Failed to upload newer local task:', err);
+                  }
+                }
               }
             }
           }
-        }
 
-        if (hasChanges) {
-          await useCategoryTopicStore.getState().loadInitialData(true);
+          if (hasChanges) {
+            await useCategoryTopicStore.getState().loadInitialData(true);
+          }
+          currentSyncState = 'synced';
+        } catch (err: any) {
+          console.warn('[Sync] Tasks listener warning:', err);
+          currentSyncState = 'error';
+          currentSyncError = err?.message || 'Tasks sync error';
         }
-        currentSyncState = 'synced';
-      } catch (err: any) {
-        console.warn('[Sync] Tasks listener warning:', err);
-        currentSyncState = 'error';
-        currentSyncError = err?.message || 'Tasks sync error';
-      } finally {
-        isApplyingRemoteSync = false;
-      }
+      });
     },
     (err) => {
       console.warn('[Sync] Tasks listener error:', err);
@@ -691,7 +836,7 @@ export function stopFirestoreSync(): void {
   }
 
   currentSyncUid = null;
-  isApplyingRemoteSync = false;
+  remoteSyncSuppressionDepth = 0;
   currentSyncState = 'idle';
   currentSyncError = null;
 }
