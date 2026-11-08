@@ -109,3 +109,4 @@ export function getCurrentUser(): AuthUserProfile | null {
   if (!auth || !auth.currentUser) return null;
   return formatUserProfile(auth.currentUser);
 }
+

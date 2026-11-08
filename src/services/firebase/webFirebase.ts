@@ -17,12 +17,12 @@ export interface FirebaseWebConfig {
 }
 
 const firebaseConfig: FirebaseWebConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyCZOq-OhF64vHXZouq503EORXk1JzebX5s',
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'daily-tasks-a69b9.firebaseapp.com',
   projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'daily-tasks-a69b9',
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'daily-tasks-a69b9.firebasestorage.app',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '449026791697',
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '1:449026791697:web:30c515636a5e2b2d5314b0',
 };
 
 let app: FirebaseApp | null = null;
@@ -90,3 +90,4 @@ export function getGoogleAuthProvider(): GoogleAuthProvider | null {
 }
 
 export { firebaseConfig };
+
