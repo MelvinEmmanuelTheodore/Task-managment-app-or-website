@@ -21,6 +21,20 @@ import { useCategoryTopicStore } from '../../src/stores/categoryTopicStore';
 import { useTimetableStore } from '../../src/stores/timetableStore';
 import { validateBackupPayload } from '../../src/utils/backupValidator';
 import { StoredDataEnvelope } from '../../src/types/storage';
+import {
+  signInWithGoogle,
+  signOutUser,
+  subscribeToAuthState,
+  checkRedirectAuth,
+  AuthUserProfile,
+} from '../../src/services/auth/authService';
+import { isFirebaseConfigured } from '../../src/services/firebase/webFirebase';
+import {
+  startFirestoreSync,
+  stopFirestoreSync,
+  checkCloudDataExists,
+} from '../../src/services/sync/firestoreSyncService';
+import { DataMigrationModal } from '../../src/components/DataMigrationModal';
 
 export default function SettingsScreen() {
   const { theme, preference, setThemePreference } = useAppTheme();
@@ -40,6 +54,18 @@ export default function SettingsScreen() {
   const [showRawPayloadModal, setShowRawPayloadModal] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
+  // Firebase Auth & Cloud Sync State
+  const [currentUser, setCurrentUser] = useState<AuthUserProfile | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [showMigrationModal, setShowMigrationModal] = useState(false);
+  const [migrationCounts, setMigrationCounts] = useState({
+    blocks: 0,
+    categories: 0,
+    topics: 0,
+    tasks: 0,
+  });
+
   // Import Preview State
   const [previewEnvelope, setPreviewEnvelope] = useState<StoredDataEnvelope | null>(null);
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
@@ -51,7 +77,77 @@ export default function SettingsScreen() {
     const storage = getStorage();
     setIsLocked(storage.isStorageLocked());
     setLockReason(storage.getCorruptionError());
+
+    // Listen to Firebase auth state if configured
+    if (isFirebaseConfigured()) {
+      checkRedirectAuth().catch(() => {});
+      const unsub = subscribeToAuthState(async (user) => {
+        setCurrentUser(user);
+        if (user) {
+          startFirestoreSync(user.uid);
+          const hasCloudData = await checkCloudDataExists(user.uid);
+          if (!hasCloudData) {
+            const envelope = await storage.loadAll();
+            if (envelope.timetableBlocks.length > 0 || envelope.categories.length > 0) {
+              setMigrationCounts({
+                blocks: envelope.timetableBlocks.length,
+                categories: envelope.categories.length,
+                topics: envelope.topics.length,
+                tasks: envelope.topicTasks.length,
+              });
+              setShowMigrationModal(true);
+            }
+          }
+        } else {
+          stopFirestoreSync();
+        }
+      });
+      return () => {
+        unsub();
+        stopFirestoreSync();
+      };
+    }
   }, []);
+
+  const handleGoogleSignIn = async () => {
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        showStatusNotice(`Signed in as ${user.displayName || user.email}`);
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Google Sign-In failed.');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signOutUser();
+      showStatusNotice('Signed out from Google account.');
+    } catch (err: any) {
+      setAuthError(err?.message || 'Sign-out failed.');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleManualMigrateOpen = async () => {
+    if (!currentUser) return;
+    const envelope = await getStorage().loadAll();
+    setMigrationCounts({
+      blocks: envelope.timetableBlocks.length,
+      categories: envelope.categories.length,
+      topics: envelope.topics.length,
+      tasks: envelope.topicTasks.length,
+    });
+    setShowMigrationModal(true);
+  };
 
   const showStatusNotice = (msg: string) => {
     setNotice(msg);
@@ -319,6 +415,126 @@ export default function SettingsScreen() {
           </View>
         </View>
       )}
+
+      {/* Cloud Synchronisation & Account (Firebase) */}
+      <View style={[styles.section, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>☁️ Cloud Sync & Account</Text>
+          <View
+            style={[
+              styles.syncStatusBadge,
+              {
+                backgroundColor: !isFirebaseConfigured()
+                  ? '#6B728022'
+                  : currentUser
+                  ? '#10B98122'
+                  : '#F59E0B22',
+                borderColor: !isFirebaseConfigured()
+                  ? '#6B7280'
+                  : currentUser
+                  ? '#10B981'
+                  : '#F59E0B',
+              },
+            ]}
+          >
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '700',
+                color: !isFirebaseConfigured()
+                  ? '#6B7280'
+                  : currentUser
+                  ? '#10B981'
+                  : '#F59E0B',
+              }}
+            >
+              {!isFirebaseConfigured()
+                ? 'Offline / Config Needed'
+                : currentUser
+                ? '● Cloud Connected'
+                : '○ Not Signed In'}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.sectionSubtitle, { color: themeColors.textSecondary }]}>
+          Synchronize your schedule, timetable blocks, and tasks across your PC browser and Android PWA.
+        </Text>
+
+        {!isFirebaseConfigured() ? (
+          <View style={[styles.infoBanner, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}>
+            <Text style={[styles.infoBannerTitle, { color: themeColors.text }]}>
+              Firebase Configuration Notice
+            </Text>
+            <Text style={[styles.infoBannerText, { color: themeColors.textSecondary }]}>
+              To enable cloud sync with project <Text style={{ fontWeight: '700' }}>daily-tasks-a69b9</Text>,
+              add your Firebase Web App credentials to your local environment (e.g. <Text style={{ fontFamily: 'monospace' }}>EXPO_PUBLIC_FIREBASE_API_KEY</Text>).
+              The app operates in local-first offline mode in the meantime.
+            </Text>
+          </View>
+        ) : currentUser ? (
+          <View>
+            <View style={[styles.userCard, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}>
+              <View style={[styles.avatarCircle, { backgroundColor: themeColors.primary }]}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 16 }}>
+                  {(currentUser.displayName || currentUser.email || 'U').charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.userName, { color: themeColors.text }]}>
+                  {currentUser.displayName || 'Google User'}
+                </Text>
+                <Text style={[styles.userEmail, { color: themeColors.textSecondary }]}>
+                  {currentUser.email || currentUser.uid}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity
+                onPress={handleManualMigrateOpen}
+                style={[styles.smallButton, { backgroundColor: themeColors.primary, borderColor: themeColors.primary, flex: 1 }]}
+              >
+                <Text style={[styles.smallButtonText, { color: '#FFFFFF' }]}>
+                  Migrate Local Data
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleSignOut}
+                disabled={isAuthLoading}
+                style={[styles.smallButton, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}
+              >
+                {isAuthLoading ? (
+                  <ActivityIndicator color={themeColors.text} size="small" />
+                ) : (
+                  <Text style={[styles.smallButtonText, { color: themeColors.danger }]}>
+                    Sign Out
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View>
+            <TouchableOpacity
+              onPress={handleGoogleSignIn}
+              disabled={isAuthLoading}
+              style={[styles.googleSignInBtn, { backgroundColor: '#4285F4' }]}
+            >
+              {isAuthLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.googleSignInText}>Sign in with Google</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {authError && (
+          <Text style={[styles.noticeText, { color: '#EF4444' }]}>{authError}</Text>
+        )}
+      </View>
 
       {/* Theme Setting */}
       <View style={[styles.section, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
@@ -618,6 +834,23 @@ export default function SettingsScreen() {
         </Text>
       </View>
 
+      {/* Data Migration Modal */}
+      {currentUser && (
+        <DataMigrationModal
+          visible={showMigrationModal}
+          uid={currentUser.uid}
+          blocksCount={migrationCounts.blocks}
+          categoriesCount={migrationCounts.categories}
+          topicsCount={migrationCounts.topics}
+          tasksCount={migrationCounts.tasks}
+          onSuccess={(res) => {
+            setShowMigrationModal(false);
+            showStatusNotice(`✓ Successfully uploaded ${res.blocksCount} timetable blocks to cloud!`);
+          }}
+          onDismiss={() => setShowMigrationModal(false)}
+        />
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -684,6 +917,67 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  syncStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  infoBanner: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 4,
+  },
+  infoBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  infoBannerText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  avatarCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  userEmail: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  googleSignInBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleSignInText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   sectionTitle: {
     fontSize: 16,

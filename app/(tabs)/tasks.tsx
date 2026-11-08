@@ -8,6 +8,7 @@ import {
   TextInput,
   Switch,
   Platform,
+  Modal,
 } from 'react-native';
 import { useTimetableStore } from '../../src/stores/timetableStore';
 import { useCategoryTopicStore } from '../../src/stores/categoryTopicStore';
@@ -87,6 +88,8 @@ export default function TimetableScreen() {
   const [rescheduleTarget, setRescheduleTarget] = useState<TimetableBlock | null>(null);
   const [rescheduleNewDate, setRescheduleNewDate] = useState('');
   const [rescheduleNewTime, setRescheduleNewTime] = useState('');
+  const [rescheduleNewDuration, setRescheduleNewDuration] = useState('60');
+  const [rescheduleNewEndTime, setRescheduleNewEndTime] = useState('10:00');
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
 
   // Delete State
@@ -98,6 +101,19 @@ export default function TimetableScreen() {
     nextPendingBlock: TimetableBlock | null;
     recoverySlot: RecoverySlot | null;
   } | null>(null);
+
+  // Prevent background scrolling on web while any modal is open
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      if (showAddModal || rescheduleTarget !== null || blockToDelete !== null) {
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+          document.body.style.overflow = originalOverflow;
+        };
+      }
+    }
+  }, [showAddModal, rescheduleTarget, blockToDelete]);
 
   useEffect(() => {
     loadInitialData();
@@ -164,14 +180,16 @@ export default function TimetableScreen() {
   // Live Overlap / Conflict Detection for Reschedule Modal
   const rescheduleConflicts = useMemo(() => {
     if (!rescheduleTarget || !validateStartTime(rescheduleNewTime)) return [];
+    const dur = parseInt(rescheduleNewDuration, 10);
+    if (!validateDurationMin(dur)) return [];
     return findConflictingBlocks(
       blocks,
       rescheduleNewDate,
       rescheduleNewTime,
-      rescheduleTarget.durationMin,
+      dur,
       rescheduleTarget.id
     );
-  }, [blocks, rescheduleTarget, rescheduleNewDate, rescheduleNewTime]);
+  }, [blocks, rescheduleTarget, rescheduleNewDate, rescheduleNewTime, rescheduleNewDuration]);
 
   // Handlers for form duration / end time synchronization
   const handleStartTimeChange = (newStart: string) => {
@@ -281,7 +299,58 @@ export default function TimetableScreen() {
     setRescheduleTarget(b);
     setRescheduleNewDate(b.date);
     setRescheduleNewTime(b.startTime);
+    setRescheduleNewDuration(b.durationMin.toString());
+    setRescheduleNewEndTime(calculateEndTime(b.startTime, b.durationMin));
     setRescheduleError(null);
+  };
+
+  const handleRescheduleStartTimeChange = (newStart: string) => {
+    setRescheduleNewTime(newStart);
+    setRescheduleError(null);
+    if (validateStartTime(newStart)) {
+      const dur = parseInt(rescheduleNewDuration, 10);
+      if (validateDurationMin(dur)) {
+        const startMins = timeToMinutes(newStart);
+        if (startMins + dur > 1440) {
+          setRescheduleError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
+        } else {
+          setRescheduleNewEndTime(calculateEndTime(newStart, dur));
+        }
+      }
+    }
+  };
+
+  const handleRescheduleDurationChange = (newDurStr: string) => {
+    setRescheduleNewDuration(newDurStr);
+    setRescheduleError(null);
+    const dur = parseInt(newDurStr, 10);
+    if (validateStartTime(rescheduleNewTime) && validateDurationMin(dur)) {
+      const startMins = timeToMinutes(rescheduleNewTime);
+      if (startMins + dur > 1440) {
+        setRescheduleError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
+      } else {
+        setRescheduleNewEndTime(calculateEndTime(rescheduleNewTime, dur));
+      }
+    }
+  };
+
+  const handleRescheduleEndTimeChange = (newEnd: string) => {
+    setRescheduleNewEndTime(newEnd);
+    setRescheduleError(null);
+    if (!validateStartTime(rescheduleNewTime)) {
+      setRescheduleError('Please enter a valid start time first.');
+      return;
+    }
+    if (validateEndTimeFormat(newEnd)) {
+      const calculated = calculateDuration(rescheduleNewTime, newEnd);
+      if (calculated <= 0) {
+        setRescheduleError('End time must be after start time on the same day.');
+      } else if (!validateDurationMin(calculated)) {
+        setRescheduleError('Calculated duration must be between 5 and 480 minutes.');
+      } else {
+        setRescheduleNewDuration(calculated.toString());
+      }
+    }
   };
 
   // Skip Suggestion Handlers
@@ -323,7 +392,11 @@ export default function TimetableScreen() {
     const { skippedBlock, recoverySlot } = skipSuggestion;
     setRescheduleTarget(skippedBlock);
     setRescheduleNewDate(skippedBlock.date);
-    setRescheduleNewTime(recoverySlot ? recoverySlot.startTime : skippedBlock.startTime);
+    const chosenStart = recoverySlot ? recoverySlot.startTime : skippedBlock.startTime;
+    const chosenDur = recoverySlot ? recoverySlot.durationMin : skippedBlock.durationMin;
+    setRescheduleNewTime(chosenStart);
+    setRescheduleNewDuration(chosenDur.toString());
+    setRescheduleNewEndTime(calculateEndTime(chosenStart, chosenDur));
     setRescheduleError(null);
     setSkipSuggestion(null);
   };
@@ -402,13 +475,27 @@ export default function TimetableScreen() {
       return;
     }
 
+    const dur = parseInt(rescheduleNewDuration, 10);
+    if (!validateDurationMin(dur)) {
+      setRescheduleError('Duration must be between 5 and 480 minutes.');
+      return;
+    }
+
+    const calculatedEnd = calculateEndTime(rescheduleNewTime, dur);
+    const timingValidation = validateBlockTiming(rescheduleNewTime, calculatedEnd, dur);
+    if (!timingValidation.valid) {
+      setRescheduleError(timingValidation.error || 'Invalid block timing or duration.');
+      return;
+    }
+
     const startMins = timeToMinutes(rescheduleNewTime);
-    if (startMins + rescheduleTarget.durationMin > 1440) {
+    if (startMins + dur > 1440) {
       setRescheduleError('Block cannot extend past midnight (24:00). Overnight blocks spanning past midnight are not supported.');
       return;
     }
 
-    await rescheduleBlock(rescheduleTarget.id, rescheduleNewDate, rescheduleNewTime);
+    // Preserve fixed status and all other properties while updating date, time, and duration
+    await rescheduleBlock(rescheduleTarget.id, rescheduleNewDate, rescheduleNewTime, dur);
     setRescheduleTarget(null);
   };
 
@@ -730,6 +817,8 @@ export default function TimetableScreen() {
               const tTask = topicTasks.find((task) => task.id === b.taskId);
               const catColor = cat?.color || '#3B82F6';
               const blockStatus = b.status || 'pending';
+              const effectivePriority = tTask?.priority || cat?.priority || b.priority || 'medium';
+              const priorityLabel = effectivePriority.charAt(0).toUpperCase() + effectivePriority.slice(1);
 
               // Check if this block has conflicts on this day
               const conflicts = findConflictingBlocks(blocks, b.date, b.startTime, b.durationMin, b.id);
@@ -801,11 +890,19 @@ export default function TimetableScreen() {
                     {b.title}
                   </Text>
 
-                  {/* Category, Topic & Task Entity Links */}
+                  {/* Category & Priority Badge, Topic & Task Entity Links */}
                   <View style={styles.entityLinksRow}>
-                    {cat && (
+                    {cat ? (
                       <View style={[styles.catBadge, { backgroundColor: catColor + '22', borderColor: catColor }]}>
-                        <Text style={[styles.catBadgeText, { color: catColor }]}>{cat.name}</Text>
+                        <Text style={[styles.catBadgeText, { color: catColor }]}>
+                          {cat.name} · {priorityLabel}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.catBadge, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}>
+                        <Text style={[styles.catBadgeText, { color: themeColors.textSecondary }]}>
+                          {priorityLabel}
+                        </Text>
                       </View>
                     )}
                     {top && (
@@ -1025,8 +1122,11 @@ export default function TimetableScreen() {
                   <View style={styles.weekDayBlocksContainer}>
                     {dayBlocksForDate.map((b) => {
                       const cat = categories.find((c) => c.id === b.categoryId);
+                      const tTask = topicTasks.find((task) => task.id === b.taskId);
                       const catColor = cat?.color || '#3B82F6';
                       const isDone = b.status === 'completed' || b.status === 'done';
+                      const effectivePriority = tTask?.priority || cat?.priority || b.priority || 'medium';
+                      const priorityLabel = effectivePriority.charAt(0).toUpperCase() + effectivePriority.slice(1);
 
                       return (
                         <TouchableOpacity
@@ -1053,6 +1153,11 @@ export default function TimetableScreen() {
                             >
                               {b.title}
                             </Text>
+                            <View style={[styles.weekCatBadge, { backgroundColor: catColor + '22', borderColor: catColor }]}>
+                              <Text style={[styles.weekCatBadgeText, { color: catColor }]}>
+                                {cat ? `${cat.name} · ${priorityLabel}` : priorityLabel}
+                              </Text>
+                            </View>
                           </View>
 
                           <View style={styles.weekMiniRight}>
@@ -1084,379 +1189,437 @@ export default function TimetableScreen() {
       {/* ADD / EDIT BLOCK MODAL                                                    */}
       {/* ========================================================================= */}
       {showAddModal && (
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={[styles.formHeading, { color: themeColors.text }]}>
-                {editingBlock ? 'Edit Timetable Block' : 'New Timetable Block'}
-              </Text>
+        <Modal
+          visible={showAddModal}
+          transparent
+          animationType="fade"
+          onRequestClose={resetForm}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '90%' }}>
+                <Text style={[styles.formHeading, { color: themeColors.text }]}>
+                  {editingBlock ? 'Edit Timetable Block' : 'New Timetable Block'}
+                </Text>
 
-              {formError && (
-                <View style={styles.errorBanner}>
-                  <Text style={styles.errorBannerText}>{formError}</Text>
-                </View>
-              )}
+                {formError && (
+                  <View style={styles.errorBanner}>
+                    <Text style={styles.errorBannerText}>{formError}</Text>
+                  </View>
+                )}
 
-              {/* Real-time Overlap Conflict Banner */}
-              {formConflicts.length > 0 && (
-                <View style={styles.conflictBanner}>
-                  <Text style={styles.conflictBannerTitle}>⚠️ Time Conflict Detected</Text>
-                  <Text style={styles.conflictBannerText}>
-                    This block overlaps with {formConflicts.map((c) => `"${c.title}" (${c.startTime})`).join(', ')}.
-                    Both blocks will occupy this time.
-                  </Text>
-                </View>
-              )}
-
-              {/* Title Input */}
-              <Text style={[styles.label, { color: themeColors.textSecondary }]}>Block Title:</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                placeholder="e.g. Morning SolidWorks Practice"
-                placeholderTextColor={themeColors.textMuted}
-                value={title}
-                onChangeText={setTitle}
-              />
-
-              {/* Date Input with quick shift */}
-              <View style={styles.fieldHeaderRow}>
-                <Text style={[styles.label, { color: themeColors.textSecondary }]}>Date (YYYY-MM-DD):</Text>
-                <View style={styles.quickDateGroup}>
-                  <TouchableOpacity
-                    onPress={() => setBlockDate(getCurrentISTDate())}
-                    style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
-                  >
-                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Today</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => setBlockDate(addDays(getCurrentISTDate(), 1))}
-                    style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
-                  >
-                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Tomorrow</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <TextInput
-                style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={themeColors.textMuted}
-                value={blockDate}
-                onChangeText={setBlockDate}
-              />
-
-              {/* Category Selector */}
-              <Text style={[styles.label, { color: themeColors.textSecondary }]}>Category (Required):</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
-                {categories.map((c) => (
-                  <TouchableOpacity
-                    key={c.id}
-                    onPress={() => {
-                      setCategoryId(c.id);
-                      setTopicId('');
-                      setTaskId('');
-                    }}
-                    style={[
-                      styles.selectorPill,
-                      {
-                        backgroundColor: categoryId === c.id ? c.color : themeColors.surfaceSecondary,
-                        borderColor: categoryId === c.id ? c.color : themeColors.border,
-                      },
-                    ]}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: categoryId === c.id ? '#FFF' : themeColors.text }}>
-                      {c.name}
+                {/* Real-time Overlap Conflict Banner */}
+                {formConflicts.length > 0 && (
+                  <View style={styles.conflictBanner}>
+                    <Text style={styles.conflictBannerTitle}>⚠️ Time Conflict Detected</Text>
+                    <Text style={styles.conflictBannerText}>
+                      This block overlaps with {formConflicts.map((c) => `"${c.title}" (${c.startTime})`).join(', ')}.
+                      Both blocks will occupy this time.
                     </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  </View>
+                )}
 
-              {/* Topic Selector (Filtered to Category) */}
-              {availableTopics.length > 0 && (
-                <View>
-                  <Text style={[styles.label, { color: themeColors.textSecondary, marginTop: 8 }]}>
-                    Link to Topic (Optional):
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
+                {/* Title Input */}
+                <Text style={[styles.label, { color: themeColors.textSecondary }]}>Block Title:</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                  placeholder="e.g. Morning SolidWorks Practice"
+                  placeholderTextColor={themeColors.textMuted}
+                  value={title}
+                  onChangeText={setTitle}
+                />
+
+                {/* Date Input with quick shift */}
+                <View style={styles.fieldHeaderRow}>
+                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>Date (YYYY-MM-DD):</Text>
+                  <View style={styles.quickDateGroup}>
                     <TouchableOpacity
+                      onPress={() => setBlockDate(getCurrentISTDate())}
+                      style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
+                    >
+                      <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Today</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setBlockDate(addDays(getCurrentISTDate(), 1))}
+                      style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
+                    >
+                      <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Tomorrow</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={themeColors.textMuted}
+                  value={blockDate}
+                  onChangeText={setBlockDate}
+                />
+
+                {/* Category Selector */}
+                <Text style={[styles.label, { color: themeColors.textSecondary }]}>Category (Required):</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
+                  {categories.map((c) => (
+                    <TouchableOpacity
+                      key={c.id}
                       onPress={() => {
+                        setCategoryId(c.id);
                         setTopicId('');
                         setTaskId('');
                       }}
                       style={[
                         styles.selectorPill,
                         {
-                          backgroundColor: !topicId ? themeColors.primary : themeColors.surfaceSecondary,
-                          borderColor: !topicId ? themeColors.primary : themeColors.border,
+                          backgroundColor: categoryId === c.id ? c.color : themeColors.surfaceSecondary,
+                          borderColor: categoryId === c.id ? c.color : themeColors.border,
                         },
                       ]}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: !topicId ? '#FFF' : themeColors.textSecondary }}>
-                        None
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: categoryId === c.id ? '#FFF' : themeColors.text }}>
+                        {c.name}
                       </Text>
                     </TouchableOpacity>
+                  ))}
+                </ScrollView>
 
-                    {availableTopics.map((t) => (
+                {/* Topic Selector (Filtered to Category) */}
+                {availableTopics.length > 0 && (
+                  <View>
+                    <Text style={[styles.label, { color: themeColors.textSecondary, marginTop: 8 }]}>
+                      Link to Topic (Optional):
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
                       <TouchableOpacity
-                        key={t.id}
                         onPress={() => {
-                          setTopicId(t.id);
+                          setTopicId('');
                           setTaskId('');
                         }}
                         style={[
                           styles.selectorPill,
                           {
-                            backgroundColor: topicId === t.id ? themeColors.primary : themeColors.surfaceSecondary,
-                            borderColor: topicId === t.id ? themeColors.primary : themeColors.border,
+                            backgroundColor: !topicId ? themeColors.primary : themeColors.surfaceSecondary,
+                            borderColor: !topicId ? themeColors.primary : themeColors.border,
                           },
                         ]}
                       >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: topicId === t.id ? '#FFF' : themeColors.text }}>
-                          {t.name}
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: !topicId ? '#FFF' : themeColors.textSecondary }}>
+                          None
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
 
-              {/* Task Selector (Filtered to Topic) */}
-              {availableTasks.length > 0 && (
-                <View>
-                  <Text style={[styles.label, { color: themeColors.textSecondary, marginTop: 8 }]}>
-                    Link to Specific Task (Optional):
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
-                    <TouchableOpacity
-                      onPress={() => setTaskId('')}
-                      style={[
-                        styles.selectorPill,
-                        {
-                          backgroundColor: !taskId ? themeColors.primary : themeColors.surfaceSecondary,
-                          borderColor: !taskId ? themeColors.primary : themeColors.border,
-                        },
-                      ]}
-                    >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: !taskId ? '#FFF' : themeColors.textSecondary }}>
-                        None
-                      </Text>
-                    </TouchableOpacity>
+                      {availableTopics.map((t) => (
+                        <TouchableOpacity
+                          key={t.id}
+                          onPress={() => {
+                            setTopicId(t.id);
+                            setTaskId('');
+                          }}
+                          style={[
+                            styles.selectorPill,
+                            {
+                              backgroundColor: topicId === t.id ? themeColors.primary : themeColors.surfaceSecondary,
+                              borderColor: topicId === t.id ? themeColors.primary : themeColors.border,
+                            },
+                          ]}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: topicId === t.id ? '#FFF' : themeColors.text }}>
+                            {t.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
 
-                    {availableTasks.map((task) => (
+                {/* Task Selector (Filtered to Topic) */}
+                {availableTasks.length > 0 && (
+                  <View>
+                    <Text style={[styles.label, { color: themeColors.textSecondary, marginTop: 8 }]}>
+                      Link to Specific Task (Optional):
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillRow}>
                       <TouchableOpacity
-                        key={task.id}
-                        onPress={() => {
-                          setTaskId(task.id);
-                          if (!title.trim()) {
-                            setTitle(task.title);
-                          }
-                        }}
+                        onPress={() => setTaskId('')}
                         style={[
                           styles.selectorPill,
                           {
-                            backgroundColor: taskId === task.id ? themeColors.primary : themeColors.surfaceSecondary,
-                            borderColor: taskId === task.id ? themeColors.primary : themeColors.border,
+                            backgroundColor: !taskId ? themeColors.primary : themeColors.surfaceSecondary,
+                            borderColor: !taskId ? themeColors.primary : themeColors.border,
                           },
                         ]}
                       >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: taskId === task.id ? '#FFF' : themeColors.text }}>
-                          {task.title}
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: !taskId ? '#FFF' : themeColors.textSecondary }}>
+                          None
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
 
-              {/* Time & Duration Controls */}
-              <View style={styles.timeInputsRow}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>Start Time:</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                    placeholder="09:00"
-                    placeholderTextColor={themeColors.textMuted}
-                    value={startTime}
-                    onChangeText={handleStartTimeChange}
-                  />
-                </View>
+                      {availableTasks.map((task) => (
+                        <TouchableOpacity
+                          key={task.id}
+                          onPress={() => {
+                            setTaskId(task.id);
+                            if (!title.trim()) {
+                              setTitle(task.title);
+                            }
+                          }}
+                          style={[
+                            styles.selectorPill,
+                            {
+                              backgroundColor: taskId === task.id ? themeColors.primary : themeColors.surfaceSecondary,
+                              borderColor: taskId === task.id ? themeColors.primary : themeColors.border,
+                            },
+                          ]}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: taskId === task.id ? '#FFF' : themeColors.text }}>
+                            {task.title}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
 
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>End Time:</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                    placeholder="10:00"
-                    placeholderTextColor={themeColors.textMuted}
-                    value={endTime}
-                    onChangeText={handleEndTimeChange}
-                  />
-                </View>
+                {/* Time & Duration Controls */}
+                <View style={styles.timeInputsRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Start Time:</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                      placeholder="09:00"
+                      placeholderTextColor={themeColors.textMuted}
+                      value={startTime}
+                      onChangeText={handleStartTimeChange}
+                    />
+                  </View>
 
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>Duration (min):</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                    placeholder="60"
-                    keyboardType="numeric"
-                    placeholderTextColor={themeColors.textMuted}
-                    value={durationMin}
-                    onChangeText={handleDurationChange}
-                  />
-                </View>
-              </View>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>End Time:</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                      placeholder="10:00"
+                      placeholderTextColor={themeColors.textMuted}
+                      value={endTime}
+                      onChangeText={handleEndTimeChange}
+                    />
+                  </View>
 
-              {/* Priority & Status Row */}
-              <View style={styles.timeInputsRow}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>Priority:</Text>
-                  <View style={styles.segmentedRow}>
-                    {(['high', 'medium', 'low'] as Priority[]).map((p) => (
-                      <TouchableOpacity
-                        key={p}
-                        onPress={() => setPriority(p)}
-                        style={[
-                          styles.segmentedBtn,
-                          priority === p && { backgroundColor: themeColors.primary },
-                        ]}
-                      >
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: priority === p ? '#FFF' : themeColors.textSecondary }}>
-                          {p.toUpperCase()}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Duration (min):</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                      placeholder="60"
+                      keyboardType="numeric"
+                      placeholderTextColor={themeColors.textMuted}
+                      value={durationMin}
+                      onChangeText={handleDurationChange}
+                    />
                   </View>
                 </View>
 
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.label, { color: themeColors.textSecondary }]}>Status:</Text>
-                  <View style={styles.segmentedRow}>
-                    {(['pending', 'completed', 'skipped'] as BlockStatus[]).map((s) => (
-                      <TouchableOpacity
-                        key={s}
-                        onPress={() => setStatus(s)}
-                        style={[
-                          styles.segmentedBtn,
-                          status === s && { backgroundColor: themeColors.primary },
-                        ]}
-                      >
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: status === s ? '#FFF' : themeColors.textSecondary }}>
-                          {s}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                {/* Priority & Status Row */}
+                <View style={styles.timeInputsRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Priority:</Text>
+                    <View style={styles.segmentedRow}>
+                      {(['high', 'medium', 'low'] as Priority[]).map((p) => (
+                        <TouchableOpacity
+                          key={p}
+                          onPress={() => setPriority(p)}
+                          style={[
+                            styles.segmentedBtn,
+                            priority === p && { backgroundColor: themeColors.primary },
+                          ]}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: priority === p ? '#FFF' : themeColors.textSecondary }}>
+                            {p.toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Status:</Text>
+                    <View style={styles.segmentedRow}>
+                      {(['pending', 'completed', 'skipped'] as BlockStatus[]).map((s) => (
+                        <TouchableOpacity
+                          key={s}
+                          onPress={() => setStatus(s)}
+                          style={[
+                            styles.segmentedBtn,
+                            status === s && { backgroundColor: themeColors.primary },
+                          ]}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: status === s ? '#FFF' : themeColors.textSecondary }}>
+                            {s}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
                 </View>
-              </View>
 
-              {/* Fixed Commitment Toggle */}
-              <View style={styles.switchRow}>
-                <View>
-                  <Text style={[styles.switchLabel, { color: themeColors.text }]}>Fixed Commitment</Text>
-                  <Text style={{ fontSize: 12, color: themeColors.textMuted }}>Protected commitment flag</Text>
+                {/* Fixed Commitment Toggle */}
+                <View style={styles.switchRow}>
+                  <View>
+                    <Text style={[styles.switchLabel, { color: themeColors.text }]}>Fixed Commitment</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textMuted }}>Protected commitment flag</Text>
+                  </View>
+                  <Switch value={isFixed} onValueChange={setIsFixed} />
                 </View>
-                <Switch value={isFixed} onValueChange={setIsFixed} />
-              </View>
 
-              {/* Optional Notes */}
-              <Text style={[styles.label, { color: themeColors.textSecondary }]}>Notes (Optional):</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-                placeholder="Goals, preparation or details..."
-                placeholderTextColor={themeColors.textMuted}
-                value={notes}
-                onChangeText={setNotes}
-              />
+                {/* Optional Notes */}
+                <Text style={[styles.label, { color: themeColors.textSecondary }]}>Notes (Optional):</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                  placeholder="Goals, preparation or details..."
+                  placeholderTextColor={themeColors.textMuted}
+                  value={notes}
+                  onChangeText={setNotes}
+                />
 
-              {/* Form Buttons */}
-              <View style={styles.formActions}>
-                <TouchableOpacity onPress={resetForm} style={styles.cancelBtn}>
-                  <Text style={{ color: themeColors.textMuted, fontWeight: '600' }}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleSaveBlock}
-                  style={[styles.saveBtn, { backgroundColor: themeColors.primary }]}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>
-                    {editingBlock ? 'Save Changes' : 'Create Block'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
+                {/* Form Buttons */}
+                <View style={styles.formActions}>
+                  <TouchableOpacity onPress={resetForm} style={styles.cancelBtn}>
+                    <Text style={{ color: themeColors.textMuted, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleSaveBlock}
+                    style={[styles.saveBtn, { backgroundColor: themeColors.primary }]}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '700' }}>
+                      {editingBlock ? 'Save Changes' : 'Create Block'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
           </View>
-        </View>
+        </Modal>
       )}
 
       {/* ========================================================================= */}
-      {/* QUICK RESCHEDULE MODAL                                                    */}
+      {/* QUICK RESCHEDULE / MOVE MODAL                                             */}
       {/* ========================================================================= */}
       {rescheduleTarget && (
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
-            <Text style={[styles.formHeading, { color: themeColors.text }]}>
-              Reschedule "{rescheduleTarget.title}"
-            </Text>
-
-            {rescheduleError && (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorBannerText}>{rescheduleError}</Text>
-              </View>
-            )}
-
-            {rescheduleConflicts.length > 0 && (
-              <View style={styles.conflictBanner}>
-                <Text style={styles.conflictBannerTitle}>⚠️ Conflict Warning</Text>
-                <Text style={styles.conflictBannerText}>
-                  Conflicts with {rescheduleConflicts.map((c) => `"${c.title}" (${c.startTime})`).join(', ')}.
+        <Modal
+          visible={rescheduleTarget !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRescheduleTarget(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: themeColors.surface, borderColor: themeColors.border }]}>
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '90%' }}>
+                <Text style={[styles.formHeading, { color: themeColors.text }]}>
+                  Move "{rescheduleTarget.title}"
                 </Text>
-              </View>
-            )}
 
-            <Text style={[styles.label, { color: themeColors.textSecondary }]}>New Date (YYYY-MM-DD):</Text>
-            <View style={styles.quickDateGroup}>
-              <TouchableOpacity
-                onPress={() => setRescheduleNewDate(getCurrentISTDate())}
-                style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
-              >
-                <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Today</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setRescheduleNewDate(addDays(getCurrentISTDate(), 1))}
-                style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
-              >
-                <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Tomorrow</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setRescheduleNewDate(addDays(rescheduleTarget.date, 7))}
-                style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
-              >
-                <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>+1 Week</Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-              value={rescheduleNewDate}
-              onChangeText={setRescheduleNewDate}
-            />
+                {rescheduleTarget.isFixed && (
+                  <View style={[styles.fixedCommitmentBanner, { backgroundColor: '#F59E0B18', borderColor: '#F59E0B' }]}>
+                    <Text style={{ color: '#D97706', fontSize: 12, fontWeight: '700' }}>
+                      🔒 Fixed Commitment Block
+                    </Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                      Moving this block will preserve its fixed commitment status.
+                    </Text>
+                  </View>
+                )}
 
-            <Text style={[styles.label, { color: themeColors.textSecondary }]}>New Start Time (HH:mm):</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
-              value={rescheduleNewTime}
-              onChangeText={setRescheduleNewTime}
-            />
+                {rescheduleError && (
+                  <View style={styles.errorBanner}>
+                    <Text style={styles.errorBannerText}>{rescheduleError}</Text>
+                  </View>
+                )}
 
-            <View style={styles.formActions}>
-              <TouchableOpacity onPress={() => setRescheduleTarget(null)} style={styles.cancelBtn}>
-                <Text style={{ color: themeColors.textMuted, fontWeight: '600' }}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleApplyReschedule}
-                style={[styles.saveBtn, { backgroundColor: themeColors.primary }]}
-              >
-                <Text style={{ color: '#FFF', fontWeight: '700' }}>Confirm Move</Text>
-              </TouchableOpacity>
+                {rescheduleConflicts.length > 0 && (
+                  <View style={styles.conflictBanner}>
+                    <Text style={styles.conflictBannerTitle}>⚠️ Conflict Warning</Text>
+                    <Text style={styles.conflictBannerText}>
+                      Conflicts with {rescheduleConflicts.map((c) => `"${c.title}" (${c.startTime})`).join(', ')}.
+                    </Text>
+                  </View>
+                )}
+
+                <Text style={[styles.label, { color: themeColors.textSecondary }]}>Date (YYYY-MM-DD):</Text>
+                <View style={styles.quickDateGroup}>
+                  <TouchableOpacity
+                    onPress={() => setRescheduleNewDate(getCurrentISTDate())}
+                    style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
+                  >
+                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Today</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setRescheduleNewDate(addDays(getCurrentISTDate(), 1))}
+                    style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
+                  >
+                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>Tomorrow</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setRescheduleNewDate(addDays(rescheduleTarget.date, 7))}
+                    style={[styles.quickDateBtn, { backgroundColor: themeColors.surfaceSecondary }]}
+                  >
+                    <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>+1 Week</Text>
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                  value={rescheduleNewDate}
+                  onChangeText={(text) => {
+                    setRescheduleNewDate(text);
+                    setRescheduleError(null);
+                  }}
+                />
+
+                <View style={styles.timeInputsRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Start Time (HH:mm):</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                      value={rescheduleNewTime}
+                      placeholder="09:00"
+                      placeholderTextColor={themeColors.textMuted}
+                      onChangeText={handleRescheduleStartTimeChange}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.label, { color: themeColors.textSecondary }]}>Duration (minutes):</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: themeColors.surfaceSecondary, color: themeColors.text, borderColor: themeColors.border }]}
+                      value={rescheduleNewDuration}
+                      keyboardType="numeric"
+                      placeholder="60"
+                      placeholderTextColor={themeColors.textMuted}
+                      onChangeText={handleRescheduleDurationChange}
+                    />
+                  </View>
+                </View>
+
+                {/* Auto-Calculated End Time Display */}
+                <View style={[styles.calculatedEndRow, { backgroundColor: themeColors.surfaceSecondary, borderColor: themeColors.border }]}>
+                  <Text style={[styles.calculatedEndLabel, { color: themeColors.textSecondary }]}>
+                    Calculated End Time:
+                  </Text>
+                  <Text style={[styles.calculatedEndValue, { color: themeColors.primary }]}>
+                    {rescheduleNewEndTime || '—'}
+                  </Text>
+                </View>
+
+                <View style={styles.formActions}>
+                  <TouchableOpacity onPress={() => setRescheduleTarget(null)} style={styles.cancelBtn}>
+                    <Text style={{ color: themeColors.textMuted, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleApplyReschedule}
+                    style={[styles.saveBtn, { backgroundColor: themeColors.primary }]}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '700' }}>Confirm Move</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </View>
-        </View>
+        </Modal>
       )}
 
       {/* Delete Confirmation Modal */}
@@ -1881,16 +2044,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#00000077',
+    ...Platform.select({
+      web: {
+        position: 'fixed' as any,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 99999,
+      },
+      default: {
+        flex: 1,
+      },
+    }),
+    backgroundColor: '#00000088',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
-    zIndex: 999,
   },
   modalCard: {
     width: '100%',
@@ -1907,6 +2077,41 @@ const styles = StyleSheet.create({
         elevation: 8,
       },
     }),
+  },
+  fixedCommitmentBanner: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  calculatedEndRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  calculatedEndLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  calculatedEndValue: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  weekCatBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    marginLeft: 6,
+    alignSelf: 'center',
+  },
+  weekCatBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   formHeading: {
     fontSize: 18,

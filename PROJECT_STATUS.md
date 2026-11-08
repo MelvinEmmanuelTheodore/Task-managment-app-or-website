@@ -1,8 +1,8 @@
 # Project Status
 
 **Current Phase:** Phase 1 (Foundation & Setup)  
-**Status:** In Progress — Step B1 (Dependencies & Config) Completed on `feat/topics-tasks-timetable` (Android Native Build Verification Pending; Step B0 Remains Unmerged with REV-018 Deferred)  
-**Last Updated:** 2026-11-07  
+**Status:** Timetable UI Improvements + Hosted PWA + Firebase Web Integration Completed on `feat/topics-tasks-timetable`  
+**Last Updated:** 2026-11-08  
 
 ---
 
@@ -21,43 +21,41 @@
   - [x] Next Activity Suggestions & Optional Recovery Rescheduling (dynamic identification of next pending block upon skip, conflict-free recovery slot finder later in the day, clear end-of-day wrap-up, and non-cascading advisory card)
   - [x] Populated "Week 1 - Initial Productivity Routine" (Monday 9 Nov – Friday 13 Nov 2026; 85 blocks; 17 blocks/day from 08:00 wake-up to 22:45 sleep prep; weekday variations for SolidWorks, ANSYS, Candidex, German, and constant LEGO McLaren P1; non-repeating)
   - [x] Local Persistence & Concurrency (`AsyncStorageAdapter` transactional write queue, persistent theme settings, JSON backup export)
-  - [x] Unit test suite (90 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `timetable.test.ts`)
-- [ ] **Step B0: Milestone A Hardening & Resilience** *(Implemented on `feat/topics-tasks-timetable`; 50 automated unit tests pass; Remaining `migrateVersion()` validation issue recorded as DEFERRED / KNOWN ISSUE REV-018; Step B0 remains unmerged into `main`)*
-  - [x] 1. Write-lock on storage corruption, invalid envelopes, raw in-memory retention & recovery retry
-  - [x] 2. Verified export with file existence/size validation, modern File/Paths API and `expo-sharing`
-  - [x] 3. Settings import UI (`expo-document-picker`), deep schema validation, deterministic merge (`seconds` + `nanoseconds`), mandatory external backup export enforcement & internal rollback snapshot verification
-  - [x] 4. Storage provider factory (`getStorage()`)
-  - [x] 5. Removal of redundant `UserSettings.categories` & deep-copied initial data
-  - [x] 6. Consolidated cascade and move logic in storage adapter returning updated envelope
-  - [x] 7. Gapped sortOrder (multiples of 1024) with collapse re-normalization
-- [ ] **Milestone B: Firebase, Cloud Sync & Google Auth**
-  - [x] **Step B1: Dependencies, Config Plugins & EAS Dev Client Preparation** *(Dependency and configuration setup completed on `feat/topics-tasks-timetable`; `expo-dev-client@~58.0.18`, `@react-native-firebase/*@^27.1.0`, `@react-native-google-signin/google-signin@^17.0.0`, `firebase@^13.2.0`; `eas.json` created; Expo config validated; 50 tests pass; typecheck clean; web export clean; Android native compilation verification pending development build execution)*
-  - [ ] **Step B2: Firebase Project Setup, Security Rules & Emulator Testing** *(Awaiting explicit user region confirmation and approval before creation; actual google-services.json and android.googleServicesFile to be configured here)*
-  - [ ] **Step B3: Authentication Service & Auth Gate UI** *(Review Google Sign-In 17.0.0 Credential Manager consideration before implementation)*
-  - [ ] **Step B4: Firestore Service Abstraction Layer**
-  - [ ] **Step B5: Resumable Local-to-Cloud Migration & Replace-All Rollback**
-  - [ ] **Step B6: Offline Sync, Real-Time Persistence & Conflict Resolution**
-- [ ] Step 3.5: Early Real-Device Alarm & Reboot Verification *(Postponed to Milestone B native testing)*
-- [ ] Step 7: Routine Templates & 7-Day Rolling Generation
-- [ ] Step 8: Multi-View Task Lists (Daily, Weekly, Monthly)
-- [ ] Step 9: Dashboard Timeline Integration
-- [ ] Step 10: Task Execution Actions ("Start now", "Finish", "Reopen" with `actualHistory`)
-- [ ] Step 11: Recurring Task Rules & Confirmation Dialogs
-- [ ] Step 12: High-Priority Notifications & Action Buttons
-- [ ] Step 13: Web Notification Warning Banner
-- [ ] Step 14: End-to-End Cross-Device Sync Verification
-- [ ] Step 15: Firebase Hosting Deployment (Web)
-- [ ] Step 16: Final Polish & Production APK Generation
+  - [x] Unit test suite (94 tests passing across `storage.test.ts`, `categoryRules.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `timetable.test.ts`)
+- [x] **Timetable UI Corrections & Enhancements**
+  - [x] **A. Move Dialog:** Editable Date, Start Time, and Duration in minutes; auto-calculated End Time; real-time conflict detection using updated duration; preserves fixed commitment status (`isFixed: true`); strict overnight block prevention.
+  - [x] **B. Dialog Positioning:** Lifts dialogs out of `ScrollView` into root viewport overlay via `<Modal>`; on web, enforced `position: 'fixed'`, centered viewport overlay (`zIndex: 99999`), internally scrollable dialog container, and document body scroll-locking while open.
+  - [x] **C. Dynamic Category & Priority:** Dynamic display of category name, color, and resolved priority (`task.priority` -> `category.priority` -> `block.priority`) across both Daily cards (e.g. `Career · High`) and Weekly view (compact colored category-priority pill on every block).
+- [x] **Progressive Web App (PWA) Configuration**
+  - [x] Web App Manifest (`public/manifest.json`): name `Time Management App`, short name `Timetable`, standalone display mode, dark UI colors (`#111827`, `#1F2937`), Android icon sizes (192, 512, maskable), start_url & scope set to `/Task-managment-app-or-website/`.
+  - [x] Service Worker (`public/sw.js`): Safe static shell precaching (cache-first for hashed static assets, network-first for HTML), complete passthrough for Firebase Auth & Firestore requests, self-updating (`skipWaiting`, `clients.claim()`).
+  - [x] Custom HTML template (`app/+html.tsx`): Injects manifest, mobile meta tags, and automatic service worker registration on web build.
+- [x] **GitHub Pages Automated Deployment**
+  - [x] Base path `/Task-managment-app-or-website/` configured in `app.json` (`experiments.baseUrl`).
+  - [x] GitHub Actions workflow (`.github/workflows/deploy-pages.yml`): automated build (`npx expo export --platform web`), SPA client-side routing fallback (`cp dist/index.html dist/404.html`), Jekyll bypass (`touch dist/.nojekyll`), and Pages deployment.
+- [x] **Firebase Web SDK & Real-time Cloud Sync**
+  - [x] Modular Firebase JS SDK integration (`firebase@^13.2.0`) targeting project `daily-tasks-a69b9` in region `asia-south1`.
+  - [x] Google Sign-In with popup and redirect fallbacks (`src/services/auth/authService.ts`).
+  - [x] Firestore multi-tab offline persistence (`persistentLocalCache`) and real-time synchronisation service (`src/services/sync/firestoreSyncService.ts`).
+  - [x] Data Migration Modal (`src/components/DataMigrationModal.tsx`) prompting first-time sign-in users to batch-upload their local schedule (including 85-block routine) to Firestore.
+  - [x] Strict security rules (`firestore.rules`) enforcing user-exclusive isolation under `/users/{userId}/...`.
+  - [x] Settings screen UI integration: Cloud connection badge, user profile card, Google sign-in/out buttons, and manual migration trigger.
 
 ---
 
-## 2. Immediate Blockers & Preserved Open Issues
-1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 is not marked as fully approved and remains unmerged on `feat/topics-tasks-timetable`.
-2. **Google Services File Timing:** The actual `google-services.json` file and the `android.googleServicesFile: "./google-services.json"` property in `app.json` will be added in Step B2 once the Firebase project has been created and the real configuration file is downloaded from the Firebase Console. Currently, the template `google-services.json.example` is checked in, and `.gitignore` ensures real credentials will not be leaked.
-3. **Preserved Stage Blockers for Milestone B:**
-   - **REV-019 (Step B2 Blocker):** Firestore history validation and append-only enforcement in Security Rules.
-   - **REV-020 (Step B2 Blocker):** Real calendar-date validation in Security Rules (handling invalid leap years and out-of-range days).
-   - **REV-021 (Step B5 Blocker):** Replace-All rollback safety, failure recovery, and audit session tracking.
-   - **REV-022 (Step B1 Partially Verified):** Dependency and platform configuration completed and validated across TS, Expo config, and web export; Android native build verification (Gradle compilation / TurboModules codegen) remains pending development build execution.
-   - **REV-023 (Step B3 Blocker / Consideration):** Review Google Sign-In 17.0.0 legacy Android SDK vs modern Android 14+ Credential Manager requirements and Play Services auth configurations before implementing `auth.native.ts`.
-4. **Current Gate:** Step B1 dependency/config setup is complete. All automated checks (`npm test`, `npm run typecheck`, `npx expo config --type public`, `npx expo export --platform web`) pass cleanly. Waiting for review before proceeding to Step B2.
+## 2. Platform Architecture: Android PWA vs Native Background Alarms
+- **PWA Web Platform:**
+  - Android Chrome allows installing the app directly from GitHub Pages as a standalone PWA with an app icon on the home screen.
+  - Synchronises data with Firestore in real-time when online and caches locally when offline.
+  - Web Push notifications are supported when the browser / service worker is active.
+- **Background Alarm Limitations on Web:**
+  - Standard web browsers cannot schedule exact wake-from-sleep alarms through Android's `AlarmManager` (`SCHEDULE_EXACT_ALARM`).
+  - When the phone screen is locked or idle, Android's battery optimization (Doze mode) suspends web browser background processes.
+  - In-app visual cues, reminders, and Web Push notifications fire reliably when the app or browser session is active, satisfying the current non-alarm notification requirement.
+
+---
+
+## 3. Preserved Open Issues & Governance
+1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 remains unmerged on `feat/topics-tasks-timetable`.
+2. **Main Branch Isolation:** All changes are maintained strictly on `feat/topics-tasks-timetable`. `main` remains untouched.
+3. **Automated Verification:** All 94 unit tests (`timetable.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `categoryRules.test.ts`, `storage.test.ts`), TypeScript check (`tsc --noEmit`), and full web export (`expo export --platform web`) succeed with zero errors.

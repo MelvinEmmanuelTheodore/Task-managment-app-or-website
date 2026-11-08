@@ -28,6 +28,9 @@
       "output": "static",
       "favicon": "./assets/favicon.png"
     },
+    "experiments": {
+      "baseUrl": "/Task-managment-app-or-website"
+    },
     "plugins": [
       "expo-router",
       "expo-sharing",

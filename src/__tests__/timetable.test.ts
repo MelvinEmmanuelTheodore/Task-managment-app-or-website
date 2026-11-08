@@ -883,5 +883,81 @@ describe('Timetable Core Functionality Suite', () => {
       expect(currentBlocks.find((b) => b.id === b3.id)?.status).toBe('skipped');
     });
   });
+
+  // 7. Move Dialog Enhancements & Rescheduling Validation
+  describe('7. Move Dialog Enhancements & Rescheduling Validation', () => {
+    it('reschedules a block with an updated duration and recalculates end time', async () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // Find the Monday 10:30 Break block (originally 15 min -> 10:45)
+      const breakBlock = allBlocks.find((b) => b.date === '2026-11-09' && b.startTime === '10:30')!;
+      expect(breakBlock).toBeDefined();
+      expect(breakBlock.durationMin).toBe(15);
+
+      // Move to Sunday with duration updated to 45 min
+      await timeStore.rescheduleBlock(breakBlock.id, '2026-11-15', '14:00', 45);
+
+      const updated = useTimetableStore.getState().blocks.find((b) => b.id === breakBlock.id)!;
+      expect(updated.date).toBe('2026-11-15');
+      expect(updated.startTime).toBe('14:00');
+      expect(updated.durationMin).toBe(45);
+      expect(calculateEndTime(updated.startTime, updated.durationMin)).toBe('14:45');
+    });
+
+    it('detects conflicts dynamically when rescheduling duration is increased', () => {
+      const timeStore = useTimetableStore.getState();
+      const allBlocks = timeStore.blocks;
+
+      // At 2026-11-09:
+      // Block A: 09:00 - 10:30 (90 min)
+      // Block B: 10:30 - 10:45 (15 min)
+      // Block C: 10:45 - 12:15 (90 min)
+
+      const blockA = allBlocks.find((b) => b.date === '2026-11-09' && b.startTime === '09:00')!;
+
+      // If Block A is rescheduled from 09:00 with 90 min (ends 10:30), no conflict with Block B at 10:30
+      const conflicts90 = findConflictingBlocks(allBlocks, '2026-11-09', '09:00', 90, blockA.id);
+      expect(conflicts90.length).toBe(0);
+
+      // If duration is extended to 105 min (ends 10:45), it conflicts with Block B (10:30)
+      const conflicts105 = findConflictingBlocks(allBlocks, '2026-11-09', '09:00', 105, blockA.id);
+      expect(conflicts105.length).toBe(1);
+      expect(conflicts105[0].startTime).toBe('10:30');
+
+      // If duration is extended to 120 min (ends 11:00), it conflicts with both Block B (10:30) and Block C (10:45)
+      const conflicts120 = findConflictingBlocks(allBlocks, '2026-11-09', '09:00', 120, blockA.id);
+      expect(conflicts120.length).toBe(2);
+    });
+
+    it('validates against overnight extensions during move operations', () => {
+      // 23:00 + 75 minutes = 00:15 (extends past midnight 24:00)
+      const validationOvernight = validateBlockTiming('23:00', '00:15', 75);
+      expect(validationOvernight.valid).toBe(false);
+      expect(validationOvernight.error).toMatch(/overnight|midnight/i);
+
+      // 23:00 + 60 minutes = 24:00 (ends exactly at midnight: valid)
+      const validationMidnight = validateBlockTiming('23:00', '24:00', 60);
+      expect(validationMidnight.valid).toBe(true);
+    });
+
+    it('preserves fixed commitment status when a block is moved', async () => {
+      const timeStore = useTimetableStore.getState();
+
+      // Find Monday Wake up block which has isFixed: true
+      const wakeBlock = timeStore.blocks.find(
+        (b) => b.date === '2026-11-09' && b.startTime === '08:00' && b.isFixed
+      )!;
+      expect(wakeBlock).toBeDefined();
+      expect(wakeBlock.isFixed).toBe(true);
+
+      // Move wake up block to 07:30
+      await timeStore.rescheduleBlock(wakeBlock.id, '2026-11-09', '07:30', 60);
+
+      const moved = useTimetableStore.getState().blocks.find((b) => b.id === wakeBlock.id)!;
+      expect(moved.startTime).toBe('07:30');
+      expect(moved.isFixed).toBe(true); // Preserved!
+    });
+  });
 });
 
