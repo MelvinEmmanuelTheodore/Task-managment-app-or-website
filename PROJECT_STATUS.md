@@ -37,7 +37,7 @@
   - [x] Modular Firebase JS SDK integration (`firebase@^13.2.0`) targeting project `daily-tasks-a69b9` in region `asia-south1`.
   - [x] Google Sign-In with popup and redirect fallbacks (`src/services/auth/authService.ts`).
   - [x] **Local-to-Cloud Sync:** Storage mutation event hub (`registerMutationListener`) in `IStorageAdapter` / `AsyncStorageAdapter`. Every create, update, status change (complete/skip/reopen), reschedule, reorder, and delete across timetable blocks, categories, topics, and topic tasks immediately syncs to Firestore (`/users/{uid}/...`).
-  - [x] **Cloud-to-Local Sync & Initial Reconciliation:** Real-time collection snapshot listeners (`onSnapshot`) for blocks, categories, topics, and tasks. On initial snapshot, bi-directional reconciliation preserves and uploads local-only/offline-created records to Firestore, while cloud-only records are applied locally. On subsequent snapshots, genuine remote deletions (`change.type === 'removed'`) immediately purge local storage and active Zustand stores.
+  - [x] **Cloud-to-Local Sync & Initial Reconciliation:** Real-time collection snapshot listeners (`onSnapshot`) for blocks, categories, topics, and tasks. On initial snapshot, bi-directional reconciliation preserves and uploads local-only/offline-created records to Firestore, while cloud-only records are applied locally. On subsequent snapshots, genuine remote deletions (`change.type === 'removed'`) immediately purge local storage and active Zustand stores. Failed uploads are tracked per collection and recorded as sync errors rather than swallowed, keeping status at `error` until successful retry/recovery.
   - [x] **Conflict & Concurrent Loop Prevention:** Timestamp comparisons (`isRemoteTimestampNewer`) prevent stale remote snapshots from overwriting fresh local edits. A re-entrant suppression counter (`withRemoteSyncSuppressed`) prevents echo writes even when multiple collection listeners run concurrently.
   - [x] **Sequential Batch Write Chunks:** Firestore batch writes partition operations into safe chunks of up to 400 operations (respecting the 500-op limit). Partial failures are accurately caught, tracked, and reported.
   - [x] **Offline Resilience & Multi-Tab Persistence:** Firestore `persistentLocalCache` with `persistentMultipleTabManager` enables offline write queueing in IndexedDB and automatic sync upon network reconnect.
@@ -45,7 +45,7 @@
   - [x] Strict security rules (`firestore.rules`) enforcing user-exclusive isolation under `/users/{userId}/...`.
   - [x] Settings screen UI integration: Cloud connection badge, user profile card, Google sign-in/out buttons, and manual migration trigger.
   - [x] App-wide lifecycle integration in `app/_layout.tsx` running sync globally regardless of active tab.
-  - [x] Unit test suite: 106 tests passing (including 12 dedicated two-way sync & regression tests in `twoWaySync.test.ts`).
+  - [x] Unit test suite: 107 tests passing (including 13 dedicated two-way sync & regression tests in `twoWaySync.test.ts`).
 
 ---
 
@@ -64,4 +64,4 @@
 ## 3. Preserved Open Issues & Governance
 1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 remains unmerged on `feat/topics-tasks-timetable`.
 2. **Main Branch Isolation:** All changes are maintained strictly on `feat/topics-tasks-timetable`. `main` remains untouched.
-3. **Automated Verification:** All 106 unit tests across 6 test suites (`twoWaySync.test.ts`, `timetable.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `categoryRules.test.ts`, `storage.test.ts`), TypeScript check (`tsc --noEmit`), and full web export (`expo export --platform web`) succeed with zero errors.
+3. **Automated Verification:** All 107 unit tests across 6 test suites (`twoWaySync.test.ts`, `timetable.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `categoryRules.test.ts`, `storage.test.ts`), TypeScript check (`tsc --noEmit`), and full web export (`expo export --platform web`) succeed with zero errors.

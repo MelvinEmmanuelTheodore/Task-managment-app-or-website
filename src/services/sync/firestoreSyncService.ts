@@ -31,6 +31,41 @@ export type SyncState = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 let currentSyncState: SyncState = 'idle';
 let currentSyncError: string | null = null;
 
+type SyncCollectionName = 'timetableBlocks' | 'categories' | 'topics' | 'topicTasks';
+
+const collectionSyncErrors: Record<SyncCollectionName, string | null> = {
+  timetableBlocks: null,
+  categories: null,
+  topics: null,
+  topicTasks: null,
+};
+
+/**
+ * Updates aggregate sync status across all tracked collections.
+ * Status can ONLY be 'synced' if no collection has an active error.
+ */
+export function updateAggregateSyncStatus(overrideError?: string | null): void {
+  const activeErrors: string[] = [];
+
+  for (const [col, err] of Object.entries(collectionSyncErrors)) {
+    if (err) {
+      activeErrors.push(`[${col}] ${err}`);
+    }
+  }
+
+  if (overrideError) {
+    activeErrors.push(overrideError);
+  }
+
+  if (activeErrors.length > 0) {
+    currentSyncState = 'error';
+    currentSyncError = activeErrors.join('; ');
+  } else {
+    currentSyncState = 'synced';
+    currentSyncError = null;
+  }
+}
+
 export function getSyncStatus(): { state: SyncState; error: string | null } {
   return {
     state: currentSyncState,
@@ -369,7 +404,7 @@ export async function handleLocalMutationToCloud(
         break;
       }
     }
-    currentSyncState = 'synced';
+    updateAggregateSyncStatus();
   } catch (err: any) {
     console.warn('[Sync] Local-to-cloud write error:', err);
     currentSyncState = 'error';
@@ -385,6 +420,7 @@ export async function handleLocalMutationToCloud(
  * 3. Subsequent snapshots: processes real-time additions, updates, and genuine remote deletions.
  * 4. Conflict resolution: timestamp comparisons prevent stale overwrites.
  * 5. Loop prevention: concurrency-safe suppression counter protects all collection listeners.
+ * 6. Error tracking: non-swallowed upload errors ensure status reflects failures accurately.
  */
 export function startFirestoreSync(uid: string): () => void {
   if (currentSyncUid === uid && activeUnsubscribes.length > 0) {
@@ -401,6 +437,11 @@ export function startFirestoreSync(uid: string): () => void {
   currentSyncUid = uid;
   currentSyncState = 'synced';
   currentSyncError = null;
+
+  // Reset collection sync errors
+  for (const col of Object.keys(collectionSyncErrors) as SyncCollectionName[]) {
+    collectionSyncErrors[col] = null;
+  }
 
   // 1. Storage mutation listener (Local -> Cloud)
   storageMutationUnsubscribe = getStorage().registerMutationListener((event) => {
@@ -425,6 +466,7 @@ export function startFirestoreSync(uid: string): () => void {
       }
 
       await withRemoteSyncSuppressed(async () => {
+        const uploadErrors: string[] = [];
         try {
           currentSyncState = 'syncing';
           const currentBlocks = await getStorage().getTimetableBlocks();
@@ -432,7 +474,6 @@ export function startFirestoreSync(uid: string): () => void {
           let hasChanges = false;
 
           if (isInitialBlocks) {
-            isInitialBlocks = false;
             const remoteDocMap = new Map<string, TimetableBlock>();
             snapshot.docs.forEach((d) => {
               remoteDocMap.set(d.id, d.data() as TimetableBlock);
@@ -451,8 +492,10 @@ export function startFirestoreSync(uid: string): () => void {
                 const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
                 try {
                   await setDoc(blockRef, localBlock, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload newer local block to cloud:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload newer block "${localBlock.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
             }
@@ -463,10 +506,16 @@ export function startFirestoreSync(uid: string): () => void {
                 const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
                 try {
                   await setDoc(blockRef, localBlock, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload local-only block to cloud:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload local-only block "${localBlock.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
+            }
+
+            if (uploadErrors.length === 0) {
+              isInitialBlocks = false;
             }
           } else {
             // Subsequent snapshots: process incremental docChanges
@@ -493,8 +542,10 @@ export function startFirestoreSync(uid: string): () => void {
                   const blockRef = doc(db, 'users', uid, 'timetableBlocks', localBlock.id);
                   try {
                     await setDoc(blockRef, localBlock, { merge: true });
-                  } catch (err) {
-                    console.warn('[Sync] Failed to upload newer local block:', err);
+                  } catch (err: any) {
+                    const msg = `Failed to upload newer block "${localBlock.id}": ${err?.message || err}`;
+                    console.warn('[Sync]', msg);
+                    uploadErrors.push(msg);
                   }
                 }
               }
@@ -504,18 +555,24 @@ export function startFirestoreSync(uid: string): () => void {
           if (hasChanges) {
             useTimetableStore.getState().setBlocksFromEnvelope(Array.from(blockMap.values()));
           }
-          currentSyncState = 'synced';
+
+          if (uploadErrors.length > 0) {
+            collectionSyncErrors.timetableBlocks = uploadErrors.join('; ');
+          } else {
+            collectionSyncErrors.timetableBlocks = null;
+          }
+          updateAggregateSyncStatus();
         } catch (err: any) {
           console.warn('[Sync] Blocks listener warning:', err);
-          currentSyncState = 'error';
-          currentSyncError = err?.message || 'Blocks sync error';
+          collectionSyncErrors.timetableBlocks = err?.message || 'Blocks sync error';
+          updateAggregateSyncStatus();
         }
       });
     },
     (err) => {
       console.warn('[Sync] Blocks listener error:', err);
-      currentSyncState = 'error';
-      currentSyncError = err?.message || 'Blocks listener failed';
+      collectionSyncErrors.timetableBlocks = err?.message || 'Blocks listener failed';
+      updateAggregateSyncStatus();
     }
   );
   activeUnsubscribes.push(unsubBlocks);
@@ -530,6 +587,7 @@ export function startFirestoreSync(uid: string): () => void {
       }
 
       await withRemoteSyncSuppressed(async () => {
+        const uploadErrors: string[] = [];
         try {
           currentSyncState = 'syncing';
           const currentCats = await getStorage().getCategories();
@@ -537,7 +595,6 @@ export function startFirestoreSync(uid: string): () => void {
           let hasChanges = false;
 
           if (isInitialCats) {
-            isInitialCats = false;
             const remoteDocMap = new Map<string, Category>();
             snapshot.docs.forEach((d) => {
               remoteDocMap.set(d.id, d.data() as Category);
@@ -553,8 +610,10 @@ export function startFirestoreSync(uid: string): () => void {
                 const catRef = doc(db, 'users', uid, 'categories', localCat.id);
                 try {
                   await setDoc(catRef, localCat, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload newer local category:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload newer category "${localCat.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
             }
@@ -564,10 +623,16 @@ export function startFirestoreSync(uid: string): () => void {
                 const catRef = doc(db, 'users', uid, 'categories', localCat.id);
                 try {
                   await setDoc(catRef, localCat, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload local-only category:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload local-only category "${localCat.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
+            }
+
+            if (uploadErrors.length === 0) {
+              isInitialCats = false;
             }
           } else {
             const docChanges = snapshot.docChanges();
@@ -591,8 +656,10 @@ export function startFirestoreSync(uid: string): () => void {
                   const catRef = doc(db, 'users', uid, 'categories', localCat.id);
                   try {
                     await setDoc(catRef, localCat, { merge: true });
-                  } catch (err) {
-                    console.warn('[Sync] Failed to upload newer local category:', err);
+                  } catch (err: any) {
+                    const msg = `Failed to upload newer category "${localCat.id}": ${err?.message || err}`;
+                    console.warn('[Sync]', msg);
+                    uploadErrors.push(msg);
                   }
                 }
               }
@@ -602,18 +669,24 @@ export function startFirestoreSync(uid: string): () => void {
           if (hasChanges) {
             await useCategoryTopicStore.getState().loadInitialData(true);
           }
-          currentSyncState = 'synced';
+
+          if (uploadErrors.length > 0) {
+            collectionSyncErrors.categories = uploadErrors.join('; ');
+          } else {
+            collectionSyncErrors.categories = null;
+          }
+          updateAggregateSyncStatus();
         } catch (err: any) {
           console.warn('[Sync] Categories listener warning:', err);
-          currentSyncState = 'error';
-          currentSyncError = err?.message || 'Categories sync error';
+          collectionSyncErrors.categories = err?.message || 'Categories sync error';
+          updateAggregateSyncStatus();
         }
       });
     },
     (err) => {
       console.warn('[Sync] Categories listener error:', err);
-      currentSyncState = 'error';
-      currentSyncError = err?.message || 'Categories listener failed';
+      collectionSyncErrors.categories = err?.message || 'Categories listener failed';
+      updateAggregateSyncStatus();
     }
   );
   activeUnsubscribes.push(unsubCats);
@@ -628,6 +701,7 @@ export function startFirestoreSync(uid: string): () => void {
       }
 
       await withRemoteSyncSuppressed(async () => {
+        const uploadErrors: string[] = [];
         try {
           currentSyncState = 'syncing';
           const currentTopics = await getStorage().getTopics();
@@ -635,7 +709,6 @@ export function startFirestoreSync(uid: string): () => void {
           let hasChanges = false;
 
           if (isInitialTopics) {
-            isInitialTopics = false;
             const remoteDocMap = new Map<string, Topic>();
             snapshot.docs.forEach((d) => {
               remoteDocMap.set(d.id, d.data() as Topic);
@@ -651,8 +724,10 @@ export function startFirestoreSync(uid: string): () => void {
                 const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
                 try {
                   await setDoc(topRef, localTopic, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload newer local topic:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload newer topic "${localTopic.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
             }
@@ -662,10 +737,16 @@ export function startFirestoreSync(uid: string): () => void {
                 const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
                 try {
                   await setDoc(topRef, localTopic, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload local-only topic:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload local-only topic "${localTopic.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
+            }
+
+            if (uploadErrors.length === 0) {
+              isInitialTopics = false;
             }
           } else {
             const docChanges = snapshot.docChanges();
@@ -689,8 +770,10 @@ export function startFirestoreSync(uid: string): () => void {
                   const topRef = doc(db, 'users', uid, 'topics', localTopic.id);
                   try {
                     await setDoc(topRef, localTopic, { merge: true });
-                  } catch (err) {
-                    console.warn('[Sync] Failed to upload newer local topic:', err);
+                  } catch (err: any) {
+                    const msg = `Failed to upload newer topic "${localTopic.id}": ${err?.message || err}`;
+                    console.warn('[Sync]', msg);
+                    uploadErrors.push(msg);
                   }
                 }
               }
@@ -700,18 +783,24 @@ export function startFirestoreSync(uid: string): () => void {
           if (hasChanges) {
             await useCategoryTopicStore.getState().loadInitialData(true);
           }
-          currentSyncState = 'synced';
+
+          if (uploadErrors.length > 0) {
+            collectionSyncErrors.topics = uploadErrors.join('; ');
+          } else {
+            collectionSyncErrors.topics = null;
+          }
+          updateAggregateSyncStatus();
         } catch (err: any) {
           console.warn('[Sync] Topics listener warning:', err);
-          currentSyncState = 'error';
-          currentSyncError = err?.message || 'Topics sync error';
+          collectionSyncErrors.topics = err?.message || 'Topics sync error';
+          updateAggregateSyncStatus();
         }
       });
     },
     (err) => {
       console.warn('[Sync] Topics listener error:', err);
-      currentSyncState = 'error';
-      currentSyncError = err?.message || 'Topics listener failed';
+      collectionSyncErrors.topics = err?.message || 'Topics listener failed';
+      updateAggregateSyncStatus();
     }
   );
   activeUnsubscribes.push(unsubTopics);
@@ -726,6 +815,7 @@ export function startFirestoreSync(uid: string): () => void {
       }
 
       await withRemoteSyncSuppressed(async () => {
+        const uploadErrors: string[] = [];
         try {
           currentSyncState = 'syncing';
           const currentTasks = await getStorage().getTopicTasks();
@@ -733,7 +823,6 @@ export function startFirestoreSync(uid: string): () => void {
           let hasChanges = false;
 
           if (isInitialTasks) {
-            isInitialTasks = false;
             const remoteDocMap = new Map<string, TopicTask>();
             snapshot.docs.forEach((d) => {
               remoteDocMap.set(d.id, d.data() as TopicTask);
@@ -749,8 +838,10 @@ export function startFirestoreSync(uid: string): () => void {
                 const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
                 try {
                   await setDoc(taskRef, localTask, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload newer local task:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload newer task "${localTask.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
             }
@@ -760,10 +851,16 @@ export function startFirestoreSync(uid: string): () => void {
                 const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
                 try {
                   await setDoc(taskRef, localTask, { merge: true });
-                } catch (err) {
-                  console.warn('[Sync] Failed to upload local-only task:', err);
+                } catch (err: any) {
+                  const msg = `Failed to upload local-only task "${localTask.id}": ${err?.message || err}`;
+                  console.warn('[Sync]', msg);
+                  uploadErrors.push(msg);
                 }
               }
+            }
+
+            if (uploadErrors.length === 0) {
+              isInitialTasks = false;
             }
           } else {
             const docChanges = snapshot.docChanges();
@@ -787,8 +884,10 @@ export function startFirestoreSync(uid: string): () => void {
                   const taskRef = doc(db, 'users', uid, 'topicTasks', localTask.id);
                   try {
                     await setDoc(taskRef, localTask, { merge: true });
-                  } catch (err) {
-                    console.warn('[Sync] Failed to upload newer local task:', err);
+                  } catch (err: any) {
+                    const msg = `Failed to upload newer task "${localTask.id}": ${err?.message || err}`;
+                    console.warn('[Sync]', msg);
+                    uploadErrors.push(msg);
                   }
                 }
               }
@@ -798,18 +897,24 @@ export function startFirestoreSync(uid: string): () => void {
           if (hasChanges) {
             await useCategoryTopicStore.getState().loadInitialData(true);
           }
-          currentSyncState = 'synced';
+
+          if (uploadErrors.length > 0) {
+            collectionSyncErrors.topicTasks = uploadErrors.join('; ');
+          } else {
+            collectionSyncErrors.topicTasks = null;
+          }
+          updateAggregateSyncStatus();
         } catch (err: any) {
           console.warn('[Sync] Tasks listener warning:', err);
-          currentSyncState = 'error';
-          currentSyncError = err?.message || 'Tasks sync error';
+          collectionSyncErrors.topicTasks = err?.message || 'Tasks sync error';
+          updateAggregateSyncStatus();
         }
       });
     },
     (err) => {
       console.warn('[Sync] Tasks listener error:', err);
-      currentSyncState = 'error';
-      currentSyncError = err?.message || 'Tasks listener failed';
+      collectionSyncErrors.topicTasks = err?.message || 'Tasks listener failed';
+      updateAggregateSyncStatus();
     }
   );
   activeUnsubscribes.push(unsubTasks);
@@ -839,6 +944,10 @@ export function stopFirestoreSync(): void {
   remoteSyncSuppressionDepth = 0;
   currentSyncState = 'idle';
   currentSyncError = null;
+
+  for (const col of Object.keys(collectionSyncErrors) as SyncCollectionName[]) {
+    collectionSyncErrors[col] = null;
+  }
 }
 
 /**

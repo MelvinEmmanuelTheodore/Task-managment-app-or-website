@@ -276,6 +276,63 @@ describe('Two-Way Firestore Synchronisation Suite', () => {
       );
     });
 
+    it('Initial reconciliation upload failure: reports error status and recovers upon retry', async () => {
+      const offlineLocalBlock: TimetableBlock = {
+        id: 'blk_failed_upload',
+        title: 'Offline Morning Yoga',
+        categoryId: 'cat_health',
+        priority: 'medium',
+        date: '2026-11-08',
+        startTime: '07:00',
+        durationMin: 30,
+        isFixed: false,
+        notes: 'Created while offline',
+        status: 'pending',
+        createdAt: { seconds: 50, nanoseconds: 0 },
+        updatedAt: { seconds: 50, nanoseconds: 0 },
+        actualStart: null,
+        actualEnd: null,
+        actualHistory: [],
+      };
+      await getStorage().saveTimetableBlock(offlineLocalBlock);
+      useTimetableStore.setState({ blocks: [offlineLocalBlock] });
+
+      startFirestoreSync(testUid);
+      expect(mockCapturedSnapshotCallbacks['timetableBlocks']).toBeDefined();
+
+      // Simulate network failure when uploading the local-only block
+      mockSetDoc.mockRejectedValueOnce(new Error('Network connectivity lost during initial upload'));
+
+      // Trigger initial snapshot
+      await mockCapturedSnapshotCallbacks['timetableBlocks']({
+        empty: true,
+        metadata: { fromCache: false },
+        docs: [],
+        docChanges: () => [],
+      });
+
+      // 1. Status must NOT be 'synced'; it must be 'error'
+      const statusAfterFailure = getSyncStatus();
+      expect(statusAfterFailure.state).toBe('error');
+      expect(statusAfterFailure.state).not.toBe('synced');
+      expect(statusAfterFailure.error).toContain('Network connectivity lost during initial upload');
+
+      // 2. Retry / subsequent snapshot where upload succeeds
+      mockSetDoc.mockResolvedValueOnce(undefined);
+
+      await mockCapturedSnapshotCallbacks['timetableBlocks']({
+        empty: true,
+        metadata: { fromCache: false },
+        docs: [],
+        docChanges: () => [],
+      });
+
+      // 3. Status recovers to 'synced' with null error
+      const statusAfterRecovery = getSyncStatus();
+      expect(statusAfterRecovery.state).toBe('synced');
+      expect(statusAfterRecovery.error).toBeNull();
+    });
+
     it('Subsequent snapshot: genuine remote deletion still removes local record', async () => {
       // 1. Initial snapshot with two blocks
       const block1: TimetableBlock = {
