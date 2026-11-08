@@ -6,6 +6,9 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAppTheme, useThemeStore } from '../src/stores/themeStore';
 import { Colors } from '../src/constants/colors';
+import { isFirebaseConfigured } from '../src/services/firebase/webFirebase';
+import { subscribeToAuthState, checkRedirectAuth } from '../src/services/auth/authService';
+import { startFirestoreSync, stopFirestoreSync } from '../src/services/sync/firestoreSyncService';
 
 export default function RootLayout() {
   const { isDark, theme } = useAppTheme();
@@ -23,6 +26,22 @@ export default function RootLayout() {
         .catch((err) => {
           console.warn('[PWA] ServiceWorker registration warning:', err);
         });
+    }
+
+    // Global Firebase Auth state & two-way synchronisation lifecycle
+    if (isFirebaseConfigured()) {
+      checkRedirectAuth().catch(() => {});
+      const unsubAuth = subscribeToAuthState((user) => {
+        if (user) {
+          startFirestoreSync(user.uid);
+        } else {
+          stopFirestoreSync();
+        }
+      });
+      return () => {
+        unsubAuth();
+        stopFirestoreSync();
+      };
     }
   }, []);
 

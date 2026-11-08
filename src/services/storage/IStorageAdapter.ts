@@ -5,10 +5,40 @@ import { TimetableBlock } from '../../types/timetable';
 import { UserSettings } from '../../types/settings';
 import { StoredDataEnvelope } from '../../types/storage';
 
+export type StorageMutationEvent =
+  | { type: 'block:save'; block: TimetableBlock }
+  | { type: 'block:delete'; blockId: string }
+  | { type: 'category:save'; category: Category }
+  | { type: 'category:delete'; categoryId: string }
+  | { type: 'category:reorder'; categories: Category[] }
+  | { type: 'topic:save'; topic: Topic }
+  | { type: 'topic:delete'; topicId: string; deletedTaskIds?: string[] }
+  | { type: 'topic:reorder'; topics: Topic[] }
+  | { type: 'task:save'; task: TopicTask }
+  | { type: 'task:delete'; taskId: string }
+  | {
+      type: 'cascade:deleteCategory';
+      categoryId: string;
+      deletedTopicIds: string[];
+      deletedTaskIds: string[];
+      deletedBlockIds: string[];
+    }
+  | {
+      type: 'move:deleteCategory';
+      fromCategoryId: string;
+      toCategoryId: string;
+      updatedTopics: Topic[];
+      updatedBlocks: TimetableBlock[];
+    }
+  | { type: 'all:replace'; envelope: StoredDataEnvelope };
+
 export interface IStorageAdapter {
   // Envelope Operations
   loadAll(): Promise<StoredDataEnvelope>;
   saveAll(envelope: StoredDataEnvelope): Promise<void>;
+
+  // Mutation Observers (for real-time two-way cloud synchronisation)
+  registerMutationListener(listener: (event: StorageMutationEvent) => void): () => void;
 
   // Category CRUD
   getCategories(): Promise<Category[]>;

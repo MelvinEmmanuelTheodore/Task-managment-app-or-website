@@ -33,13 +33,18 @@
 - [x] **GitHub Pages Automated Deployment**
   - [x] Base path `/Task-managment-app-or-website/` configured in `app.json` (`experiments.baseUrl`).
   - [x] GitHub Actions workflow (`.github/workflows/deploy-pages.yml`): automated build (`npx expo export --platform web`), SPA client-side routing fallback (`cp dist/index.html dist/404.html`), Jekyll bypass (`touch dist/.nojekyll`), and Pages deployment.
-- [x] **Firebase Web SDK & Real-time Cloud Sync**
+- [x] **Firebase Web SDK & Comprehensive Two-Way Real-time Cloud Sync**
   - [x] Modular Firebase JS SDK integration (`firebase@^13.2.0`) targeting project `daily-tasks-a69b9` in region `asia-south1`.
   - [x] Google Sign-In with popup and redirect fallbacks (`src/services/auth/authService.ts`).
-  - [x] Firestore multi-tab offline persistence (`persistentLocalCache`) and real-time synchronisation service (`src/services/sync/firestoreSyncService.ts`).
-  - [x] Data Migration Modal (`src/components/DataMigrationModal.tsx`) prompting first-time sign-in users to batch-upload their local schedule (including 85-block routine) to Firestore.
+  - [x] **Local-to-Cloud Sync:** Storage mutation event hub (`registerMutationListener`) in `IStorageAdapter` / `AsyncStorageAdapter`. Every create, update, status change (complete/skip/reopen), reschedule, reorder, and delete across timetable blocks, categories, topics, and topic tasks immediately syncs to Firestore (`/users/{uid}/...`).
+  - [x] **Cloud-to-Local Sync:** Real-time collection snapshot listeners (`onSnapshot`) for blocks, categories, topics, and tasks. Remote creations, modifications, and deletions (`change.type === 'removed'`) immediately update local storage and active Zustand stores.
+  - [x] **Conflict & Loop Prevention:** Timestamp comparisons (`isRemoteTimestampNewer`) prevent stale remote snapshots from overwriting fresh local edits. `isApplyingRemoteSync` suppresses echo loops during remote synchronization.
+  - [x] **Offline Resilience & Multi-Tab Persistence:** Firestore `persistentLocalCache` with `persistentMultipleTabManager` enables offline write queueing in IndexedDB and automatic sync upon network reconnect.
+  - [x] Data Migration Modal (`src/components/DataMigrationModal.tsx`) prompting first-time sign-in users to batch-upload their local schedule (including 85-block routine) to Firestore without overwriting cloud data.
   - [x] Strict security rules (`firestore.rules`) enforcing user-exclusive isolation under `/users/{userId}/...`.
   - [x] Settings screen UI integration: Cloud connection badge, user profile card, Google sign-in/out buttons, and manual migration trigger.
+  - [x] App-wide lifecycle integration in `app/_layout.tsx` running sync globally regardless of active tab.
+  - [x] Unit test suite: 105 tests passing (including 11 dedicated two-way sync tests in `twoWaySync.test.ts`).
 
 ---
 
@@ -58,4 +63,4 @@
 ## 3. Preserved Open Issues & Governance
 1. **Deferred B0 Known Issue (REV-018):** The remaining edge-case validation in `migrateVersion()` is recorded as DEFERRED / KNOWN ISSUE per user instruction. Step B0 remains unmerged on `feat/topics-tasks-timetable`.
 2. **Main Branch Isolation:** All changes are maintained strictly on `feat/topics-tasks-timetable`. `main` remains untouched.
-3. **Automated Verification:** All 94 unit tests (`timetable.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `categoryRules.test.ts`, `storage.test.ts`), TypeScript check (`tsc --noEmit`), and full web export (`expo export --platform web`) succeed with zero errors.
+3. **Automated Verification:** All 105 unit tests across 6 test suites (`twoWaySync.test.ts`, `timetable.test.ts`, `milestoneA.test.ts`, `stepB0.test.ts`, `categoryRules.test.ts`, `storage.test.ts`), TypeScript check (`tsc --noEmit`), and full web export (`expo export --platform web`) succeed with zero errors.

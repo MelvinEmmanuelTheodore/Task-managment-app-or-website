@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { IStorageAdapter } from './IStorageAdapter';
+import { IStorageAdapter, StorageMutationEvent } from './IStorageAdapter';
 import { StoredDataEnvelope } from '../../types/storage';
 import { Category } from '../../types/category';
 import { Topic } from '../../types/topic';
@@ -43,6 +43,24 @@ export class AsyncStorageAdapter implements IStorageAdapter {
   private isLocked = false;
   private corruptionError: string | null = null;
   private inMemoryRawCorruptedPayload: string | null = null;
+  private mutationListeners: Set<(event: StorageMutationEvent) => void> = new Set();
+
+  registerMutationListener(listener: (event: StorageMutationEvent) => void): () => void {
+    this.mutationListeners.add(listener);
+    return () => {
+      this.mutationListeners.delete(listener);
+    };
+  }
+
+  private notifyMutation(event: StorageMutationEvent): void {
+    for (const listener of this.mutationListeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.warn('[Storage] Mutation listener error:', err);
+      }
+    }
+  }
 
   isStorageLocked(): boolean {
     return this.isLocked;
@@ -333,12 +351,14 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         data.categories.push(category);
       }
     });
+    this.notifyMutation({ type: 'category:save', category });
   }
 
   async deleteCategory(categoryId: string): Promise<void> {
     await this.mutateEnvelope((data) => {
       data.categories = data.categories.filter((c) => c.id !== categoryId);
     });
+    this.notifyMutation({ type: 'category:delete', categoryId });
   }
 
   async getTopics(): Promise<Topic[]> {
@@ -355,13 +375,17 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         data.topics.push(topic);
       }
     });
+    this.notifyMutation({ type: 'topic:save', topic });
   }
 
   async deleteTopic(topicId: string): Promise<void> {
+    let deletedTaskIds: string[] = [];
     await this.mutateEnvelope((data) => {
+      deletedTaskIds = data.topicTasks.filter((task) => task.topicId === topicId).map((t) => t.id);
       data.topics = data.topics.filter((t) => t.id !== topicId);
       data.topicTasks = data.topicTasks.filter((task) => task.topicId !== topicId);
     });
+    this.notifyMutation({ type: 'topic:delete', topicId, deletedTaskIds });
   }
 
   async getTopicTasks(): Promise<TopicTask[]> {
@@ -378,12 +402,14 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         data.topicTasks.push(task);
       }
     });
+    this.notifyMutation({ type: 'task:save', task });
   }
 
   async deleteTopicTask(taskId: string): Promise<void> {
     await this.mutateEnvelope((data) => {
       data.topicTasks = data.topicTasks.filter((t) => t.id !== taskId);
     });
+    this.notifyMutation({ type: 'task:delete', taskId });
   }
 
   async getTimetableBlocks(): Promise<TimetableBlock[]> {
@@ -400,12 +426,14 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         data.timetableBlocks.push(block);
       }
     });
+    this.notifyMutation({ type: 'block:save', block });
   }
 
   async deleteTimetableBlock(blockId: string): Promise<void> {
     await this.mutateEnvelope((data) => {
       data.timetableBlocks = data.timetableBlocks.filter((b) => b.id !== blockId);
     });
+    this.notifyMutation({ type: 'block:delete', blockId });
   }
 
   async getSettings(): Promise<UserSettings> {
@@ -499,6 +527,7 @@ export class AsyncStorageAdapter implements IStorageAdapter {
 
     // 2. Perform replacement
     await this.saveAll(validation.envelope);
+    this.notifyMutation({ type: 'all:replace', envelope: validation.envelope });
     return validation.envelope;
   }
 
@@ -605,40 +634,63 @@ export class AsyncStorageAdapter implements IStorageAdapter {
 
   async reorderCategories(orderedIds: string[]): Promise<void> {
     const now = dateToAppTimestamp(new Date());
+    let updatedCategories: Category[] = [];
     await this.mutateEnvelope((data) => {
       data.categories = data.categories.map((c) => {
         const newOrder = orderedIds.indexOf(c.id);
         return newOrder >= 0 ? { ...c, sortOrder: (newOrder + 1) * 1024, updatedAt: now } : c;
       });
+      updatedCategories = data.categories.filter((c) => orderedIds.includes(c.id));
     });
+    this.notifyMutation({ type: 'category:reorder', categories: updatedCategories });
   }
 
   async reorderTopics(categoryId: string, orderedIds: string[]): Promise<void> {
     const now = dateToAppTimestamp(new Date());
+    let updatedTopics: Topic[] = [];
     await this.mutateEnvelope((data) => {
       data.topics = data.topics.map((t) => {
         if (t.categoryId !== categoryId) return t;
         const newOrder = orderedIds.indexOf(t.id);
         return newOrder >= 0 ? { ...t, sortOrder: (newOrder + 1) * 1024, updatedAt: now } : t;
       });
+      updatedTopics = data.topics.filter((t) => t.categoryId === categoryId);
     });
+    this.notifyMutation({ type: 'topic:reorder', topics: updatedTopics });
   }
 
   async deleteCategoryCascade(categoryId: string): Promise<StoredDataEnvelope> {
-    return this.mutateEnvelope((data) => {
+    let deletedTopicIds: string[] = [];
+    let deletedTaskIds: string[] = [];
+    let deletedBlockIds: string[] = [];
+    const res = await this.mutateEnvelope((data) => {
       const topicIdsToDelete = new Set(
         data.topics.filter((t) => t.categoryId === categoryId).map((t) => t.id)
       );
+      deletedTopicIds = Array.from(topicIdsToDelete);
+      deletedTaskIds = data.topicTasks.filter((task) => topicIdsToDelete.has(task.topicId)).map((t) => t.id);
+      deletedBlockIds = data.timetableBlocks.filter((b) => b.categoryId === categoryId).map((b) => b.id);
+
       data.categories = data.categories.filter((c) => c.id !== categoryId);
       data.topics = data.topics.filter((t) => t.categoryId !== categoryId);
       data.topicTasks = data.topicTasks.filter((task) => !topicIdsToDelete.has(task.topicId));
       data.timetableBlocks = data.timetableBlocks.filter((b) => b.categoryId !== categoryId);
     });
+    this.notifyMutation({
+      type: 'cascade:deleteCategory',
+      categoryId,
+      deletedTopicIds,
+      deletedTaskIds,
+      deletedBlockIds,
+    });
+    return res;
   }
 
   async moveCategoryContentsAndDelete(fromCategoryId: string, toCategoryId: string): Promise<StoredDataEnvelope> {
     const now = dateToAppTimestamp(new Date());
-    return this.mutateEnvelope((data) => {
+    let updatedTopics: Topic[] = [];
+    let updatedBlocks: TimetableBlock[] = [];
+    const res = await this.mutateEnvelope((data) => {
       data.topics = data.topics.map((t) =>
         t.categoryId === fromCategoryId ? { ...t, categoryId: toCategoryId, updatedAt: now } : t
       );
@@ -646,7 +698,17 @@ export class AsyncStorageAdapter implements IStorageAdapter {
         b.categoryId === fromCategoryId ? { ...b, categoryId: toCategoryId, updatedAt: now } : b
       );
       data.categories = data.categories.filter((c) => c.id !== fromCategoryId);
+      updatedTopics = data.topics.filter((t) => t.categoryId === toCategoryId);
+      updatedBlocks = data.timetableBlocks.filter((b) => b.categoryId === toCategoryId);
     });
+    this.notifyMutation({
+      type: 'move:deleteCategory',
+      fromCategoryId,
+      toCategoryId,
+      updatedTopics,
+      updatedBlocks,
+    });
+    return res;
   }
 }
 
